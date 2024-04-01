@@ -3,15 +3,15 @@ let menuIcon = document.querySelector('.menu-icon');
 let cancelIcon = document.querySelector('.cancel-icon');
 let headerLinks = document.querySelector('.header-links');
 
-menuIcon.addEventListener('click', function () {
-  headerLinks.style.display = 'block';
-  headerLinks.style.right = '0';
+menuIcon.addEventListener('click', function() {
+    headerLinks.style.display = 'block';
+    headerLinks.style.right = '0';
 });
 
-cancelIcon.addEventListener('click', function () {
+cancelIcon.addEventListener('click', function() {
 
-  headerLinks.style.right = '-100vh';
-  headerLinks.style.display = 'none';
+    headerLinks.style.right = '-100vh';
+    headerLinks.style.display = 'none';
 });
 
 // theme color change script
@@ -20,8 +20,8 @@ const root = document.documentElement; // Get the root element (<html>)
 const primaryThemeColor = getComputedStyle(root).getPropertyValue('--primary-theme-color');
 themeInput.value = primaryThemeColor;
 
-themeInput.addEventListener('change', function () {
-  // Get the value of the input element when it changes
-  const color = themeInput.value;
-  document.documentElement.style.setProperty('--primary-theme-color', color);
+themeInput.addEventListener('change', function() {
+    // Get the value of the input element when it changes
+    const color = themeInput.value;
+    document.documentElement.style.setProperty('--primary-theme-color', color);
 });
