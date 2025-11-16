@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Akileshkumar | portfolio</title>
+    <title>Akileshkumar | Security Researcher</title>
     <!-- favicon -->
     <link rel="shortcut icon" href="./assets/img/front-face.png" type="image/x-icon">
     <!-- css links -->
@@ -14,13 +14,17 @@
 </head>
 
 <body>
-    <!-- theme picket -->
+    <!-- theme picker -->
     <div class="theme-picker">
         <input type="color" id="theme" title="select color theme">
     </div>
+    
     <!-- header content -->
     <header>
-        <div>
+        <div class="logo-container">
+            <a href="https://github.com/cyb3r-w0lf" target="_blank">
+                <img src="https://github.com/cyb3r-w0lf.png" alt="cyb3r-w0lf" class="header-profile-pic">
+            </a>
             <a href="./index.html"><span class="logo-text"><span class="blue-span">cyb3r-w0lf</span></span></a>
         </div>
         <div class="header-links">
@@ -30,9 +34,12 @@
             </div>
             <div>
                 <ul>
-                    <li><a href="./index.html">Home</a></li>
-                    <li><a href="./index.html#service">Service</a></li>
-                    <li><a href="./index.html#about">Contact</a></li>
+                    <li><a href="#home">Home</a></li>
+                    <li><a href="#experience">Experience</a></li>
+                    <li><a href="#service">Services</a></li>
+                    <li><a href="#skills">Skills</a></li>
+                    <li><a href="#achievements">Achievements</a></li>
+                    <li><a href="#about">About</a></li>
                 </ul>
             </div>
             <div>
@@ -44,15 +51,16 @@
             <i class="fa-solid fa-bars"></i>
         </div>
     </header>
+    
     <!-- main content -->
     <main>
         <!-- main section -->
-        <section class="main-section">
+        <section class="main-section" id="home">
             <div class="main-text">
                 <h3 title="Hello buddy 👋">#whoami</h3>
                 <h1><span class="logo-text"><span class="blue-span">Akileshkumar</span></span></h1>
                 <p class="grey-span">
-                    Security Researcher <a href="https://traboda.com/" target="_blank">@Traboda Cyberlabs</a>, currently focusing on Android Security.<br> Engages part-time in Bug Bounty Programs and occasionally participates in challenges at HackTheBox.
+                    Security Researcher with 4+ years of hands-on experience in offensive security at <a href="https://traboda.com/" target="_blank" style="color: var(--primary-theme-color);">@Traboda Cyberlabs</a>, specializing in web application, Android, and API penetration testing. Recognized in eBay Hall of Fame and active community contributor through technical workshops at BSides Kerala and SINCON.
                 </p>
                 <div class="social-icon">
                     <a href="https://github.com/cyb3r-w0lf" target="_blank"><i class="fa-brands fa-github"></i></a>
@@ -63,39 +71,149 @@
                 <a href="#about"><button class="btn">Read More</button></a>
             </div>
             <div class="main-img">
-                <img src="./assets/img/laptop-hood.png" alt="portfolio cartoon image">
+                <img src="./assets/img/laptop-hood.png" alt="Security Researcher">
             </div>
         </section>
+        
+        <!-- experience section -->
+        <section class="experience-section" id="experience">
+            <h1>Professional <span class="blue-span">Experience</span></h1>
+            <div class="experience-grid">
+                <div class="experience-card">
+                    <h3>Security Researcher</h3>
+                    <p class="period">Traboda Cyberlabs Pvt Ltd | June 2022 – Present</p>
+                    <p>Conducting comprehensive penetration testing on web applications, APIs, and Android applications. Performing reverse engineering, developing proof-of-concept exploits, and creating CTF challenges. Mentoring bi0s pentest team in competitive CTF events.</p>
+                </div>
+                <div class="experience-card">
+                    <h3>Bug Bounty Hunter</h3>
+                    <p class="period">Independent | 2020 – 2021</p>
+                    <p>Performed independent security research on web applications and APIs through public and private bug bounty programs. Earned placement in eBay Security Center Hall of Fame and received monetary bounties from Zerocopter platform.</p>
+                </div>
+            </div>
+        </section>
+        
         <!-- service section -->
         <section class="service-section" id="service">
             <h1>My <span class="blue-span">Services</span></h1>
             <div class="service-cards-container">
                 <div class="service-card">
-                    <i class="fa-solid fa-earth-asia"></i>
+                    <i class="fa-solid fa-globe"></i>
                     <h4>Web Application Pentesting</h4>
-                    <p>Identify and mitigate security vulnerabilities in online applications to safeguard against cyber threats and unauthorized access.</p>
+                    <p>Comprehensive security assessments identifying SQL injection, XSS, authentication bypasses, and other critical vulnerabilities to safeguard against cyber threats.</p>
                 </div>
                 <div class="service-card">
-                    <i class="fa-solid fa-mobile"></i>
+                    <i class="fa-brands fa-android"></i>
                     <h4>Android Application Pentesting</h4>
-                    <p>Assess and enhance the security of mobile applications on the Android platform, identifying and addressing vulnerabilities to ensure robust protection against cyber threats.</p>
+                    <p>Deep security analysis using static and dynamic techniques, discovering Intent redirection vulnerabilities, insecure WebView implementations, deep-link issues, and misconfigured components.</p>
                 </div>
                 <div class="service-card">
-                    <i class="fa-solid fa-cloud"></i>
+                    <i class="fa-solid fa-server"></i>
                     <h4>API Pentesting</h4>
-                    <p>Evaluating the security of application programming interfaces, ensuring the integrity and confidentiality of data exchanges and preventing potential vulnerabilities.</p>
+                    <p>Thorough evaluation of RESTful and GraphQL APIs, ensuring data integrity, confidentiality, and preventing potential vulnerabilities in application programming interfaces.</p>
                 </div>
-                <!-- <div class="service-card">
-                    <i class="fa-solid fa-laptop-code"></i>
-                    <h4>Thick/Thin Client Pentesting</h4>
-                    <p>Evaluate and fortify the security of both desktop (thick) and lightweight (thin) client applications, securing endpoints against potential vulnerabilities and cyber threats.</p>
-                </div> -->
+                <div class="service-card">
+                    <i class="fa-solid fa-code"></i>
+                    <h4>Reverse Engineering</h4>
+                    <p>Expert binary analysis and reverse engineering using Ghidra, IDA Pro, and Frida for vulnerability discovery and exploit development in various platforms.</p>
+                </div>
             </div>
         </section>
+        
+        <!-- skills section -->
+        <section class="skills-section" id="skills">
+            <h1>Technical <span class="blue-span">Skills</span></h1>
+            <div class="skills-container">
+                <div class="skill-category">
+                    <h3>Penetration Testing</h3>
+                    <div class="skills-list">
+                        <span class="skill-tag">Web Application Security</span>
+                        <span class="skill-tag">API Security Testing</span>
+                        <span class="skill-tag">Android Security</span>
+                        <span class="skill-tag">Thick Client Testing</span>
+                        <span class="skill-tag">VAPT</span>
+                    </div>
+                </div>
+                <div class="skill-category">
+                    <h3>Security Tools</h3>
+                    <div class="skills-list">
+                        <span class="skill-tag">Burp Suite</span>
+                        <span class="skill-tag">Frida</span>
+                        <span class="skill-tag">MobSF</span>
+                        <span class="skill-tag">Jadx</span>
+                        <span class="skill-tag">APKTool</span>
+                        <span class="skill-tag">Ghidra</span>
+                        <span class="skill-tag">IDA Pro</span>
+                        <span class="skill-tag">GDB</span>
+                        <span class="skill-tag">Metasploit</span>
+                        <span class="skill-tag">Wireshark</span>
+                    </div>
+                </div>
+                <div class="skill-category">
+                    <h3>Programming & Scripting</h3>
+                    <div class="skills-list">
+                        <span class="skill-tag">Python</span>
+                        <span class="skill-tag">Bash</span>
+                        <span class="skill-tag">C</span>
+                        <span class="skill-tag">Java</span>
+                        <span class="skill-tag">JavaScript</span>
+                        <span class="skill-tag">PHP</span>
+                        <span class="skill-tag">SQL</span>
+                    </div>
+                </div>
+                <div class="skill-category">
+                    <h3>Hardware & IoT</h3>
+                    <div class="skills-list">
+                        <span class="skill-tag">Raspberry Pi</span>
+                        <span class="skill-tag">Arduino</span>
+                        <span class="skill-tag">RTL-SDR</span>
+                        <span class="skill-tag">NodeMCU</span>
+                        <span class="skill-tag">Software Defined Radio</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+        
+        <!-- achievements section -->
+        <section class="achievements-section" id="achievements">
+            <h1>Recognition & <span class="blue-span">Achievements</span></h1>
+            <div class="achievements-grid">
+                <div class="achievement-card">
+                    <i class="fa-solid fa-trophy"></i>
+                    <h4>eBay Hall of Fame</h4>
+                    <p>Official recognition for responsible vulnerability disclosure (2020)</p>
+                </div>
+                <div class="achievement-card">
+                    <i class="fa-solid fa-sack-dollar"></i>
+                    <h4>Bug Bounty Rewards</h4>
+                    <p>Monetary bounties from Zerocopter platform (2021, 2022)</p>
+                </div>
+                <div class="achievement-card">
+                    <i class="fa-solid fa-cube"></i>
+                    <h4>Hack The Box Hacker</h4>
+                    <p>Achieved Hacker rank demonstrating advanced pentesting capabilities</p>
+                </div>
+                <div class="achievement-card">
+                    <i class="fa-solid fa-person-chalkboard"></i>
+                    <h4>Workshop Speaker</h4>
+                    <p>BSides Kerala & SINCON 2025 - Android Security Workshops</p>
+                </div>
+                <div class="achievement-card">
+                    <i class="fa-solid fa-flag-checkered"></i>
+                    <h4>CTF Challenge Developer</h4>
+                    <p>Created challenges for MNC recruitment and Jeopardy CTF competitions</p>
+                </div>
+                <div class="achievement-card">
+                    <i class="fa-solid fa-user-graduate"></i>
+                    <h4>Team Mentor</h4>
+                    <p>Active mentor for bi0s pentest team in national/international CTFs</p>
+                </div>
+            </div>
+        </section>
+        
         <!-- about section -->
         <section class="about-section" id="about">
             <div class="img-div">
-                <img src="./assets/img/profile.png" alt="image">
+                <img src="./assets/img/profile.png" alt="Akileshkumar">
             </div>
             <div>
                 <!-- about me list -->
@@ -103,20 +221,33 @@
                     <li>
                         <h1>I'm a <span class="blue-span">Security Researcher</span> and <span class="blue-span">Bug Hunter</span></h1>
                     </li>
-                    <li><strong>Experience : </strong>Cybersecurity specialist with over 4 years of hands-on experience in offensive security, focusing on web application, Android, and API penetration testing.  Expertise in vulnerability discovery, reverse engineering, and creating unique exploit chains
-                        <br> <strong>Hall-of-Fame : </strong><a href="https://pages.ebay.com/securitycenter/security_researchers_acknowledgements.html" target="_blank" onload="scrollToXPath(); return false;">Ebay</a>
-                        <br> <strong>Bounties :</strong> zerocopter</li>
-                    <li><strong>What i do? : </strong> Web Application, Android, API Pentesting </li>
-                    <li><strong>Email : </strong><a href="mailto:akihaxor@proton.me">akihaxor@proton.me</a></li>
+                    <li>
+                        <strong>Experience:</strong> Cybersecurity specialist with over 4 years of hands-on experience in offensive security, focusing on web application, Android, and API penetration testing. Expertise in vulnerability discovery, reverse engineering, and creating unique exploit chains.
+                    </li>
+                    <li>
+                        <strong>Hall of Fame:</strong> <a href="https://pages.ebay.com/securitycenter/security_researchers_acknowledgements.html" target="_blank">eBay</a>
+                    </li>
+                    <li>
+                        <strong>Bounties:</strong> Zerocopter
+                    </li>
+                    <li>
+                        <strong>What I Do:</strong> Web Application, Android, API Pentesting, Reverse Engineering, Binary Exploitation, CTF Challenge Development
+                    </li>
+                    <li>
+                        <strong>Email:</strong> <a href="mailto:akihaxor@proton.me">akihaxor@proton.me</a>
+                    </li>
+                    <li>
+                        <strong>Journey:</strong> Self-taught professional who transitioned from school dropout to cybersecurity expert through dedication and continuous learning.
                     </li>
                 </ol>
             </div>
         </section>
     </main>
+    
     <footer>
-        <p>Copyright &copy; 2025 - AllRights
-            Reserved.</p>
+        <p>Copyright &copy; 2025 Akileshkumar - All Rights Reserved.</p>
     </footer>
+    
     <!-- script link only for menu toggle & theme picker -->
     <script src="./assets/js/main.js"></script>
 </body>
