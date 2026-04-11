@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blog — cyb3r-w0lf | Security Research</title>
+<meta name="description" content="Security research write-ups, vulnerability analyses, and exploit deep dives by Akileshkumar (cyb3r-w0lf).">
+<link rel="shortcut icon" href="../assets/img/front-face.png" type="image/x-icon">
+<meta property="og:title" content="Blog — cyb3r-w0lf | Security Research">
+<meta property="og:description" content="Security research write-ups, vulnerability analyses, and exploit deep dives by Akileshkumar.">
+<meta property="og:type" content="website">
+<meta property="og:image" content="https://github.com/cyb3r-w0lf.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+:root{
+  --bg:#0d0f14;
+  --surface:#131720;
+  --surface2:#181e2a;
+  --border:rgba(18,189,255,0.12);
+  --border2:rgba(18,189,255,0.25);
+  --accent:#12bdff;
+  --accent-dim:rgba(18,189,255,0.12);
+  --accent-glow:rgba(18,189,255,0.30);
+  --text:#e8eaf0;
+  --text2:#8892a4;
+  --text3:#4a5368;
+  --mono:'JetBrains Mono',monospace;
+  --display:'Syne',sans-serif;
+  --transition:0.3s cubic-bezier(0.4,0,0.2,1);
+}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:15px;line-height:1.75;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+/* scanlines */
+body::before{content:'';pointer-events:none;position:fixed;inset:0;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);}
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--accent);border-radius:3px;}
+::selection{background:var(--accent-dim);color:var(--accent);}
+a{text-decoration:none;color:var(--text);transition:color var(--transition);}
+img{max-width:100%;height:auto;display:block;}
+
+/* ── HEADER ── */
+.site-header{
+  background:rgba(13,15,20,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  padding:0 48px;height:64px;display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:800;border-bottom:1px solid var(--border);
+}
+.logo{font-family:var(--mono);font-size:.95rem;font-weight:600;display:flex;align-items:center;gap:10px;color:var(--text);}
+.logo img{width:30px;height:30px;border-radius:50%;border:2px solid var(--accent);transition:box-shadow var(--transition);}
+.logo img:hover{box-shadow:0 0 12px var(--accent-glow);}
+.logo-accent{color:var(--accent);}
+.header-nav{display:flex;align-items:center;gap:14px;}
+.nav-btn{
+  font-family:var(--mono);font-size:.78rem;color:var(--text2);
+  display:flex;align-items:center;gap:6px;
+  padding:6px 14px;border-radius:6px;border:1px solid transparent;
+  transition:all var(--transition);
+}
+.nav-btn.primary{background:var(--accent-dim);border-color:var(--border2);color:var(--accent);}
+.nav-btn.primary:hover{background:var(--accent);color:var(--bg);}
+.nav-btn:not(.primary):hover{color:var(--text);border-color:var(--border);}
+
+/* ── PAGE HERO ── */
+.page-hero{
+  max-width:860px;margin:0 auto;padding:72px 24px 48px;
+  position:relative;
+}
+.hero-grid{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+  background-size:60px 60px;
+  mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,black 20%,transparent 80%);
+  -webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,black 20%,transparent 80%);
+  opacity:.5;
+}
+.page-hero .inner{position:relative;z-index:1;}
+.section-tag{
+  font-family:var(--mono);font-size:.72rem;color:var(--accent);
+  opacity:.85;letter-spacing:.1em;display:inline-block;margin-bottom:14px;
+}
+.page-hero h1{
+  font-family:var(--display);font-size:clamp(2rem,5vw,3rem);font-weight:800;
+  letter-spacing:-.03em;margin-bottom:14px;color:var(--text);
+}
+.page-hero h1 span{color:var(--accent);}
+.page-hero .desc{font-size:.88rem;color:var(--text2);line-height:1.85;max-width:540px;}
+
+/* ── POSTS ── */
+.posts-section{max-width:860px;margin:0 auto;padding:0 24px 100px;position:relative;z-index:1;}
+.posts-count{
+  font-size:.7rem;color:var(--text3);letter-spacing:.1em;text-transform:uppercase;
+  margin-bottom:28px;display:flex;align-items:center;gap:8px;
+}
+.posts-count::after{content:'';flex:1;height:1px;background:var(--border);}
+.posts-count span{color:var(--accent);}
+
+.post-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:14px;
+  padding:32px;margin-bottom:20px;transition:all var(--transition);
+  position:relative;overflow:hidden;display:block;color:var(--text);
+}
+.post-card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--accent),transparent);
+}
+.post-card:hover{
+  border-color:var(--border2);transform:translateY(-5px);
+  box-shadow:0 16px 40px rgba(18,189,255,.1);
+}
+.post-card:hover h2{color:var(--accent);}
+
+.post-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:16px;}
+.post-date{font-size:.7rem;color:var(--text3);}
+.post-badge{
+  font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;
+  padding:3px 9px;border-radius:4px;font-weight:500;border:1px solid;font-family:var(--mono);
+}
+.badge-latest{background:rgba(18,189,255,.12);color:var(--accent);border-color:var(--border2);}
+.badge-android{background:rgba(61,220,151,.1);color:#3ddc97;border-color:rgba(61,220,151,.22);}
+.badge-windows{background:rgba(255,170,68,.1);color:#ffaa44;border-color:rgba(255,170,68,.22);}
+.badge-lpe{background:rgba(255,95,95,.1);color:#ff5f5f;border-color:rgba(255,95,95,.22);}
+.badge-cve{background:rgba(181,160,255,.1);color:#b5a0ff;border-color:rgba(181,160,255,.22);}
+
+.post-card h2{
+  font-family:var(--display);font-size:1.2rem;font-weight:700;
+  color:var(--text);margin-bottom:12px;letter-spacing:-.01em;line-height:1.3;
+  transition:color var(--transition);
+}
+.post-card .excerpt{
+  font-size:.83rem;color:var(--text2);line-height:1.78;margin-bottom:22px;
+}
+.post-footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
+.read-btn{
+  font-family:var(--mono);font-size:.75rem;padding:7px 18px;border-radius:6px;
+  border:1px solid var(--accent);color:var(--accent);background:var(--accent-dim);
+  transition:all var(--transition);display:inline-flex;align-items:center;gap:8px;
+}
+.read-btn:hover{background:var(--accent);color:var(--bg);}
+.post-tags{display:flex;gap:8px;flex-wrap:wrap;}
+.ptag{
+  font-size:.66rem;font-family:var(--mono);color:var(--text3);
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);
+  padding:2px 8px;border-radius:4px;
+}
+
+/* ── FOOTER ── */
+footer{background:var(--bg);border-top:1px solid var(--border);padding:28px 48px;}
+.footer-inner{max-width:860px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
+.footer-logo{font-family:var(--mono);font-size:.85rem;font-weight:600;color:var(--accent);}
+footer p{font-size:.72rem;color:var(--text3);}
+.footer-links{display:flex;gap:18px;}
+.footer-links a{font-size:.72rem;color:var(--text2);font-family:var(--mono);transition:color var(--transition);}
+.footer-links a:hover{color:var(--accent);}
+
+@media(max-width:640px){
+  .site-header{padding:0 16px;}
+  .page-hero{padding:48px 16px 32px;}
+  .posts-section{padding:0 16px 80px;}
+  footer{padding:20px 16px;}
+  .footer-inner{flex-direction:column;align-items:flex-start;gap:8px;}
+  .post-card{padding:22px;}
+}
+</style>
+</head>
+<body>
+
+<div class="hero-grid" aria-hidden="true"></div>
+
+<header class="site-header">
+  <a href="../index.html" class="logo">
+    <img src="https://github.com/cyb3r-w0lf.png" alt="cyb3r-w0lf github avatar">
+    <span>~/</span><span class="logo-accent">cyb3r-w0lf</span>
+  </a>
+  <nav class="header-nav">
+    <a href="../index.html" class="nav-btn primary"><i class="fa-solid fa-arrow-left"></i> Portfolio</a>
+  </nav>
+</header>
+
+<main>
+  <div class="page-hero">
+    <div class="inner">
+      <span class="section-tag">// research &amp; write-ups</span>
+      <h1>Security <span>Blog</span></h1>
+      <p class="desc">Vulnerability analyses, exploit deep dives, and research notes on web, Android, and Windows security.</p>
+    </div>
+  </div>
+
+  <section class="posts-section">
+    <p class="posts-count"><span>2</span>&nbsp;posts</p>
+
+    <!-- BlueHammer — latest -->
+    <article class="post-card">
+      <div class="post-meta">
+        <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;April 2026</span>
+        <span class="post-badge badge-latest">Latest</span>
+        <span class="post-badge badge-windows">Windows</span>
+        <span class="post-badge badge-lpe">LPE</span>
+      </div>
+      <h2>BlueHammer: Fixing the Bugs in a Windows Zero-Day LPE PoC</h2>
+      <p class="excerpt">Deep dive into BlueHammer — a Windows local privilege escalation exploit that chains Windows Defender RPC abuse, Volume Shadow Copy Service, opportunistic locks and SAM offline parsing to reach SYSTEM without any kernel bug or memory corruption. Full root-cause analysis, broken code walkthrough, and fixes.</p>
+      <div class="post-footer">
+        <a href="./bluehammer-writeup.html" class="read-btn"><i class="fa-solid fa-book-open"></i> Read Post</a>
+        <div class="post-tags">
+          <span class="ptag">Windows</span>
+          <span class="ptag">LPE</span>
+          <span class="ptag">RPC</span>
+          <span class="ptag">VSS</span>
+          <span class="ptag">Exploit Dev</span>
+        </div>
+      </div>
+    </article>
+
+    <!-- Dirty Stream -->
+    <article class="post-card">
+      <div class="post-meta">
+        <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;June 2024</span>
+        <span class="post-badge badge-android">Android</span>
+        <span class="post-badge badge-cve">CVE-2024-35205</span>
+      </div>
+      <h2>Dirty Stream: Weaponizing Android's ContentProvider — CVE-2024-35205</h2>
+      <p class="excerpt">A technical deep dive into CVE-2024-35205 — how a rogue FileProvider turns Android's inter-app file sharing into an arbitrary write primitive. Covers vulnerability background, PoC dissection, full attack chain analysis, detection strategies, and mitigations.</p>
+      <div class="post-footer">
+        <a href="./dirty-stream-android-blog.html" class="read-btn"><i class="fa-solid fa-book-open"></i> Read Post</a>
+        <div class="post-tags">
+          <span class="ptag">Android</span>
+          <span class="ptag">CVE</span>
+          <span class="ptag">ContentProvider</span>
+          <span class="ptag">FileProvider</span>
+        </div>
+      </div>
+    </article>
+  </section>
+</main>
+
+<footer>
+  <div class="footer-inner">
+    <span class="footer-logo">cyb3r-w0lf</span>
+    <p>Copyright &copy; 2026 Akileshkumar — All Rights Reserved.</p>
+    <div class="footer-links">
+      <a href="../index.html">Portfolio</a>
+      <a href="../index.html#about">Contact</a>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
