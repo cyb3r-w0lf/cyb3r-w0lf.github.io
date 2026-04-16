@@ -189,13 +189,35 @@ footer p{font-size:.72rem;color:var(--text3);}
   </div>
 
   <section class="posts-section">
-    <p class="posts-count"><span>2</span>&nbsp;posts</p>
+    <p class="posts-count"><span>3</span>&nbsp;posts</p>
 
-    <!-- BlueHammer — latest -->
+    <!-- RedSun — latest -->
     <article class="post-card">
       <div class="post-meta">
         <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;April 2026</span>
         <span class="post-badge badge-latest">Latest</span>
+        <span class="post-badge badge-windows">Windows</span>
+        <span class="post-badge badge-lpe">LPE</span>
+      </div>
+      <h2>RedSun: When Windows Defender Defeats Itself — SYSTEM via AV-Assisted Arbitrary Write</h2>
+      <p class="excerpt">A Windows privilege escalation PoC that turns Windows Defender's own remediation logic into a SYSTEM-privilege write primitive. Chains VSS, batch oplocks, Cloud Files placeholders, POSIX semantics delete, and directory junctions to redirect Defender's restore write into System32 — then hijacks a COM-activated system service to get an interactive SYSTEM shell.</p>
+      <div class="post-footer">
+        <a href="./redsun-writeup.html" class="read-btn"><i class="fa-solid fa-book-open"></i> Read Post</a>
+        <div class="post-tags">
+          <span class="ptag">Windows</span>
+          <span class="ptag">LPE</span>
+          <span class="ptag">Defender</span>
+          <span class="ptag">Oplocks</span>
+          <span class="ptag">Cloud Files</span>
+          <span class="ptag">VSS</span>
+        </div>
+      </div>
+    </article>
+
+    <!-- BlueHammer -->
+    <article class="post-card">
+      <div class="post-meta">
+        <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;April 2026</span>
         <span class="post-badge badge-windows">Windows</span>
         <span class="post-badge badge-lpe">LPE</span>
       </div>
