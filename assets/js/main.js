@@ -8,7 +8,7 @@ const overlay    = document.createElement('div');
 
 overlay.style.cssText = `
     position:fixed; inset:0; background:rgba(0,0,0,0.55);
-    z-index:940; display:none; backdrop-filter:blur(2px);
+    z-index:850; display:none;
 `;
 document.body.appendChild(overlay);
 
@@ -34,39 +34,41 @@ document.querySelectorAll('#nav-links a').forEach(link => {
     link.addEventListener('click', closeMenu);
 });
 
-// close on Escape
+// close menu on Escape
 document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') closeMenu();
+    if (e.key === 'Escape') { closeMenu(); }
 });
 
 
 // ── THEME COLOUR PICKER ──────────────────────────────────────────
+const themeBtn   = document.getElementById('theme-btn');
 const themeInput = document.getElementById('theme');
-const root = document.documentElement;
-
-// Sync picker with current CSS var
-const currentTheme = getComputedStyle(root).getPropertyValue('--primary-theme-color').trim();
-if (currentTheme && currentTheme.startsWith('#')) {
-    themeInput.value = currentTheme;
-}
-
-themeInput.addEventListener('input', function () {
-    const color = this.value;
-    root.style.setProperty('--primary-theme-color', color);
-
-    // derive dimmed / glow variants
-    root.style.setProperty('--accent-dim',  hexToRgba(color, 0.15));
-    root.style.setProperty('--accent-glow', hexToRgba(color, 0.35));
-    root.style.setProperty('--border',       hexToRgba(color, 0.12));
-    root.style.setProperty('--border-hover', hexToRgba(color, 0.30));
-});
+const root       = document.documentElement;
 
 function hexToRgba(hex, alpha) {
-    const r = parseInt(hex.slice(1,3), 16);
-    const g = parseInt(hex.slice(3,5), 16);
-    const b = parseInt(hex.slice(5,7), 16);
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
     return `rgba(${r},${g},${b},${alpha})`;
 }
+
+function applyTheme(color) {
+    root.style.setProperty('--primary-theme-color', color);
+    root.style.setProperty('--accent-dim',   hexToRgba(color, 0.15));
+    root.style.setProperty('--accent-glow',  hexToRgba(color, 0.35));
+    root.style.setProperty('--border',        hexToRgba(color, 0.12));
+    root.style.setProperty('--border-hover',  hexToRgba(color, 0.30));
+    themeBtn.style.background   = color;
+    themeBtn.style.borderColor  = color;
+    themeBtn.style.boxShadow    = `0 0 12px ${hexToRgba(color, 0.35)}`;
+}
+
+// Seed button color from CSS var on load
+const initColor = getComputedStyle(root).getPropertyValue('--primary-theme-color').trim();
+if (initColor.startsWith('#')) { themeInput.value = initColor; applyTheme(initColor); }
+
+themeBtn.addEventListener('click', () => themeInput.click());
+themeInput.addEventListener('input', function () { applyTheme(this.value); });
 
 
 // ── SMOOTH SCROLL (works alongside CSS scroll-behavior) ──────────

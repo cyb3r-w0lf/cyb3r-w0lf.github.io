@@ -120,6 +120,7 @@ img{max-width:100%;height:auto;display:block;}
 }
 .badge-latest{background:rgba(18,189,255,.12);color:var(--accent);border-color:var(--border2);}
 .badge-android{background:rgba(61,220,151,.1);color:#3ddc97;border-color:rgba(61,220,151,.22);}
+.badge-linux{background:rgba(61,220,151,.1);color:#3ddc97;border-color:rgba(61,220,151,.22);}
 .badge-windows{background:rgba(255,170,68,.1);color:#ffaa44;border-color:rgba(255,170,68,.22);}
 .badge-lpe{background:rgba(255,95,95,.1);color:#ff5f5f;border-color:rgba(255,95,95,.22);}
 .badge-cve{background:rgba(181,160,255,.1);color:#b5a0ff;border-color:rgba(181,160,255,.22);}
@@ -189,13 +190,36 @@ footer p{font-size:.72rem;color:var(--text3);}
   </div>
 
   <section class="posts-section">
-    <p class="posts-count"><span>3</span>&nbsp;posts</p>
+    <p class="posts-count"><span>4</span>&nbsp;posts</p>
 
-    <!-- RedSun — latest -->
+    <!-- Copy Fail — latest -->
+    <article class="post-card">
+      <div class="post-meta">
+        <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;May 2026</span>
+        <span class="post-badge badge-latest">Latest</span>
+        <span class="post-badge badge-linux">Linux</span>
+        <span class="post-badge badge-lpe">LPE</span>
+        <span class="post-badge badge-cve">CVE-2026-31431</span>
+      </div>
+      <h2>Copy Fail: 732 Bytes to Root on Every Linux Since 2017</h2>
+      <p class="excerpt">A nine-year-old Linux kernel bug in the AEAD crypto subsystem lets any local user corrupt in-memory file contents without touching disk, bypass every standard integrity tool, and gain root in under two seconds — on Ubuntu, RHEL, Amazon Linux, and SUSE. Includes a vulnerability checker and mitigation script.</p>
+      <div class="post-footer">
+        <a href="./copy-fail.html" class="read-btn"><i class="fa-solid fa-book-open"></i> Read Post</a>
+        <div class="post-tags">
+          <span class="ptag">Linux</span>
+          <span class="ptag">LPE</span>
+          <span class="ptag">Kernel</span>
+          <span class="ptag">AF_ALG</span>
+          <span class="ptag">Page Cache</span>
+          <span class="ptag">CVE</span>
+        </div>
+      </div>
+    </article>
+
+    <!-- RedSun -->
     <article class="post-card">
       <div class="post-meta">
         <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;April 2026</span>
-        <span class="post-badge badge-latest">Latest</span>
         <span class="post-badge badge-windows">Windows</span>
         <span class="post-badge badge-lpe">LPE</span>
       </div>
@@ -245,7 +269,7 @@ footer p{font-size:.72rem;color:var(--text3);}
       <h2>Dirty Stream: Weaponizing Android's ContentProvider — CVE-2024-35205</h2>
       <p class="excerpt">A technical deep dive into CVE-2024-35205 — how a rogue FileProvider turns Android's inter-app file sharing into an arbitrary write primitive. Covers vulnerability background, PoC dissection, full attack chain analysis, detection strategies, and mitigations.</p>
       <div class="post-footer">
-        <a href="./dirty-stream-android-blog.html" class="read-btn"><i class="fa-solid fa-book-open"></i> Read Post</a>
+        <a href="./dirty-stream-android.html" class="read-btn"><i class="fa-solid fa-book-open"></i> Read Post</a>
         <div class="post-tags">
           <span class="ptag">Android</span>
           <span class="ptag">CVE</span>

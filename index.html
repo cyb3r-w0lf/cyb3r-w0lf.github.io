@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
     <title>Akileshkumar | Security Researcher</title>
     <meta name="description" content="Security Researcher with 4+ years in offensive security — web, Android, API pentesting, reverse engineering.">
     <meta property="og:title" content="Akileshkumar | Security Researcher">
@@ -22,9 +22,8 @@
     <div class="scanlines" aria-hidden="true"></div>
 
     <!-- theme picker -->
-    <div class="theme-picker" title="Pick accent color">
-        <input type="color" id="theme" title="select color theme" value="#12bdff">
-    </div>
+    <button class="theme-btn" id="theme-btn" aria-label="Pick accent color" title="Pick accent color"></button>
+    <input type="color" id="theme" value="#12bdff" aria-hidden="true" tabindex="-1">
 
     <!-- header -->
     <header id="main-header">
@@ -82,7 +81,7 @@
                 </div>
                 <div class="hero-btns">
                     <a href="#about"><button class="btn btn-primary">Read More</button></a>
-                    <a href="./blogs/redsun-writeup.html"><button class="btn btn-secondary"><i class="fa-solid fa-rss"></i> Latest Blog</button></a>
+                    <a href="./blogs/copy-fail.html"><button class="btn btn-secondary"><i class="fa-solid fa-rss"></i> Latest Blog</button></a>
                 </div>
             </div>
 
@@ -267,8 +266,8 @@
                 <div class="achievement-card blog-teaser-card">
                     <i class="fa-solid fa-pen-nib"></i>
                     <h4>Latest Write-up</h4>
-                    <p>RedSun — Windows LPE via Defender self-sabotage and arbitrary write to System32</p>
-                    <a href="./blogs/redsun-writeup.html" class="read-blog-btn">Read →</a>
+                    <p>Copy Fail — Linux kernel LPE via page cache poisoning, roots any system since 2017</p>
+                    <a href="./blogs/copy-fail.html" class="read-blog-btn">Read →</a>
                     <a href="./blogs/index.html" class="read-blog-btn" style="margin-top:4px;opacity:.75;">All Posts →</a>
                 </div>
             </div>
