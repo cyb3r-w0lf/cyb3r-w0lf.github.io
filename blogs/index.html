@@ -10,6 +10,13 @@
 <meta property="og:description" content="Security research write-ups, vulnerability analyses, and exploit deep dives by Akileshkumar.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://github.com/cyb3r-w0lf.png">
+
+<!-- Twitter Cards -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Blog — cyb3r-w0lf | Security Research">
+<meta name="twitter:description" content="Security research write-ups, vulnerability analyses, and exploit deep dives by Akileshkumar.">
+<meta name="twitter:image" content="https://github.com/cyb3r-w0lf.png">
+
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
@@ -60,7 +67,7 @@ img{max-width:100%;height:auto;display:block;}
   transition:all var(--transition);
 }
 .nav-btn.primary{background:var(--accent-dim);border-color:var(--border2);color:var(--accent);}
-.nav-btn.primary:hover{background:var(--accent);color:var(--bg);}
+.nav-btn.primary:hover{background:var(--accent);color:var(--bg-on-accent);}
 .nav-btn:not(.primary):hover{color:var(--text);border-color:var(--border);}
 
 /* ── PAGE HERO ── */
@@ -83,7 +90,7 @@ img{max-width:100%;height:auto;display:block;}
 }
 .page-hero h1{
   font-family:var(--display);font-size:clamp(2rem,5vw,3rem);font-weight:800;
-  letter-spacing:-.03em;margin-bottom:14px;color:var(--text);
+  letter-spacing:-0.01em;margin-bottom:14px;color:var(--text);
 }
 .page-hero h1 span{color:var(--accent);}
 .page-hero .desc{font-size:.88rem;color:var(--text2);line-height:1.85;max-width:540px;}
@@ -139,7 +146,7 @@ img{max-width:100%;height:auto;display:block;}
   border:1px solid var(--accent);color:var(--accent);background:var(--accent-dim);
   transition:all var(--transition);display:inline-flex;align-items:center;gap:8px;
 }
-.read-btn:hover{background:var(--accent);color:var(--bg);}
+.read-btn:hover{background:var(--accent);color:var(--bg-on-accent);}
 .post-tags{display:flex;gap:8px;flex-wrap:wrap;}
 .ptag{
   font-size:.66rem;font-family:var(--mono);color:var(--text3);
@@ -192,11 +199,36 @@ footer p{font-size:.72rem;color:var(--text3);}
   <section class="posts-section">
     <p class="posts-count"><span>4</span>&nbsp;posts</p>
 
-    <!-- Copy Fail — latest -->
+    
+    <!-- Dirty Frag -->
+    <article class="post-card">
+    <div class="post-meta">
+        <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;May 2026</span>
+        <span class="post-badge badge-latest">Latest</span>
+        <span class="post-badge badge-linux">Linux</span>
+        <span class="post-badge badge-lpe">LPE</span>
+        <span class="post-badge badge-cve">CVE-2026-43284</span>
+        <span class="post-badge badge-cve">CVE-2026-43500</span>
+      </div>
+      <h2>Dirty Frag: Copy Fail's Harder Sibling That Beats Your Mitigation</h2>
+      <p class="excerpt">A week after Copy Fail, researcher Hyunwoo Kim chained two separate Linux kernel flaws — in the IPsec ESP and RxRPC networking stacks — to produce the same page-cache-poisoning root primitive, on every major distro, with a public one-liner PoC. The critical twist: it works even on systems where the Copy Fail algif_aead mitigation is already applied. Includes both variant deep-dives, detection rules, and a mitigation script.</p>
+      <div class="post-footer">
+        <a href="./dirty-frag.html" class="read-btn"><i class="fa-solid fa-book-open"></i> Read Post</a>
+        <div class="post-tags">
+          <span class="ptag">Linux</span>
+          <span class="ptag">LPE</span>
+          <span class="ptag">Kernel</span>
+          <span class="ptag">IPsec</span>
+          <span class="ptag">RxRPC</span>
+          <span class="ptag">CVE</span>
+        </div>
+      </div>
+    </article>
+
+    <!-- Copy Fail -->
     <article class="post-card">
       <div class="post-meta">
         <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;May 2026</span>
-        <span class="post-badge badge-latest">Latest</span>
         <span class="post-badge badge-linux">Linux</span>
         <span class="post-badge badge-lpe">LPE</span>
         <span class="post-badge badge-cve">CVE-2026-31431</span>
@@ -291,6 +323,6 @@ footer p{font-size:.72rem;color:var(--text3);}
     </div>
   </div>
 </footer>
-
+<script src="../assets/js/main.js"></script>
 </body>
 </html>

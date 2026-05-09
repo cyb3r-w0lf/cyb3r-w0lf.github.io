@@ -52,23 +52,62 @@ function hexToRgba(hex, alpha) {
     return `rgba(${r},${g},${b},${alpha})`;
 }
 
-function applyTheme(color) {
-    root.style.setProperty('--primary-theme-color', color);
-    root.style.setProperty('--accent-dim',   hexToRgba(color, 0.15));
-    root.style.setProperty('--accent-glow',  hexToRgba(color, 0.35));
-    root.style.setProperty('--border',        hexToRgba(color, 0.12));
-    root.style.setProperty('--border-hover',  hexToRgba(color, 0.30));
-    themeBtn.style.background   = color;
-    themeBtn.style.borderColor  = color;
-    themeBtn.style.boxShadow    = `0 0 12px ${hexToRgba(color, 0.35)}`;
+function getLuminance(hex) {
+    const r = parseInt(hex.slice(1, 3), 16) / 255;
+    const g = parseInt(hex.slice(3, 5), 16) / 255;
+    const b = parseInt(hex.slice(5, 7), 16) / 255;
+    const a = [r, g, b].map(v => v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+    return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722;
 }
 
-// Seed button color from CSS var on load
-const initColor = getComputedStyle(root).getPropertyValue('--primary-theme-color').trim();
-if (initColor.startsWith('#')) { themeInput.value = initColor; applyTheme(initColor); }
+function applyTheme(color) {
+    // Apply to both Portfolio and Blog variable sets
+    root.style.setProperty('--primary-theme-color', color);
+    root.style.setProperty('--accent', color);
+    
+    root.style.setProperty('--accent-dim',   hexToRgba(color, 0.15));
+    root.style.setProperty('--accent-glow',  hexToRgba(color, 0.35));
+    root.style.setProperty('--border',       hexToRgba(color, 0.12));
+    root.style.setProperty('--border-hover', hexToRgba(color, 0.30));
+    root.style.setProperty('--border2',      hexToRgba(color, 0.25));
 
-themeBtn.addEventListener('click', () => themeInput.click());
-themeInput.addEventListener('input', function () { applyTheme(this.value); });
+    // Contrast guardrail
+    const luminance = getLuminance(color);
+    if (luminance > 0.6) {
+        root.style.setProperty('--bg-on-accent', '#0d0f14');
+    } else {
+        root.style.setProperty('--bg-on-accent', '#ffffff');
+    }
+
+    if (themeBtn) {
+        themeBtn.style.background   = color;
+        themeBtn.style.borderColor  = color;
+        themeBtn.style.boxShadow    = `0 0 12px ${hexToRgba(color, 0.35)}`;
+    }
+    
+    // Use sessionStorage so it persists during navigation but can be reset
+    sessionStorage.setItem('selected-theme', color);
+}
+
+// Reset theme on refresh (if user reloads the page manually)
+const navEntries = performance.getEntriesByType('navigation');
+if (navEntries.length > 0 && navEntries[0].type === 'reload') {
+    sessionStorage.removeItem('selected-theme');
+}
+
+// Initialize theme
+const savedColor = sessionStorage.getItem('selected-theme');
+const cssColor = getComputedStyle(root).getPropertyValue('--primary-theme-color').trim() || 
+                 getComputedStyle(root).getPropertyValue('--accent').trim();
+const initColor = savedColor || cssColor;
+
+if (initColor && initColor.startsWith('#')) {
+    if (themeInput) themeInput.value = initColor;
+    applyTheme(initColor);
+}
+
+if (themeBtn) themeBtn.addEventListener('click', () => themeInput.click());
+if (themeInput) themeInput.addEventListener('input', function () { applyTheme(this.value); });
 
 
 // ── SMOOTH SCROLL (works alongside CSS scroll-behavior) ──────────
