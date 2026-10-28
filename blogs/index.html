@@ -197,14 +197,35 @@ footer p{font-size:.72rem;color:var(--text3);}
   </div>
 
   <section class="posts-section">
-    <p class="posts-count"><span>4</span>&nbsp;posts</p>
+    <p class="posts-count"><span>6</span>&nbsp;posts</p>
 
-    
+    <!-- CVE-2026-49881 -->
+    <article class="post-card">
+      <div class="post-meta">
+        <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;October 2026</span>
+        <span class="post-badge badge-latest">Latest</span>
+        <span class="post-badge badge-android">Android</span>
+        <span class="post-badge badge-lpe">LPE</span>
+        <span class="post-badge badge-cve">CVE-2026-49881</span>
+      </div>
+      <h2>TLPE: A Flashlight App That Owns Your Phone</h2>
+      <p class="excerpt">A logic bug in Android 17's InCallController.serviceClassExists() lets any app with only the auto-granted MANAGE_OWN_CALLS permission execute code as system_server (UID 1000). Silent camera streaming, permission grants, IMEI theft, system settings modification - all from a working flashlight app, with no user interaction beyond opening it.</p>
+      <div class="post-footer">
+        <a href="./cve-2026-49881.html" class="read-btn"><i class="fa-solid fa-book-open"></i> Read Post</a>
+        <div class="post-tags">
+          <span class="ptag">Android</span>
+          <span class="ptag">Privilege Escalation</span>
+          <span class="ptag">Telecom</span>
+          <span class="ptag">UID 1000</span>
+          <span class="ptag">CVE</span>
+        </div>
+      </div>
+    </article>
+
     <!-- Dirty Frag -->
     <article class="post-card">
     <div class="post-meta">
         <span class="post-date"><i class="fa-regular fa-calendar"></i>&nbsp;May 2026</span>
-        <span class="post-badge badge-latest">Latest</span>
         <span class="post-badge badge-linux">Linux</span>
         <span class="post-badge badge-lpe">LPE</span>
         <span class="post-badge badge-cve">CVE-2026-43284</span>
